@@ -1,0 +1,99 @@
+import { LogOut } from "lucide-react";
+import type { ReactNode } from "react";
+import { NavLink, useLocation } from "react-router-dom";
+
+import { cn } from "@/lib/utils";
+import { useAuth } from "@/store/AuthProvider";
+import { useWick } from "@/store/WickProvider";
+
+const NAV = [
+  { to: "/", label: "Wick" },
+  { to: "/pnl", label: "P&L" },
+  { to: "/settings", label: "Config" },
+] as const;
+
+/** One slim status bar, three destinations, nothing else. */
+export function Shell({ children }: { children: ReactNode }) {
+  const { session, signOut } = useAuth();
+  const { pathname } = useLocation();
+  const { unseen, status, prefs, armedCount } = useWick();
+
+  return (
+    <div className="min-h-screen bg-background scanlines">
+      <header className="sticky top-0 z-30 border-b border-border bg-background/95 backdrop-blur">
+        <div className="mx-auto flex h-10 max-w-[1440px] items-center gap-3 px-3 sm:gap-5 sm:px-4">
+          <NavLink to="/" className="flex shrink-0 items-center gap-2">
+            <span
+              className={cn(
+                "h-[13px] w-[3px] rounded-full transition-colors",
+                armedCount > 0 ? "bg-neg shadow-[0_0_8px_hsl(var(--neg))]" : "bg-primary",
+              )}
+            />
+            {/* Tighter wordmark under 400px so the three destinations never push the bar wider than the phone. */}
+            <span className="num text-[10.5px] font-semibold uppercase tracking-[0.1em] text-foreground min-[400px]:text-[12px] min-[400px]:tracking-[0.16em]">
+              Nova<span className="text-primary">Exhaustion</span>
+            </span>
+          </NavLink>
+
+          <nav className="flex min-w-0 items-center gap-px overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {NAV.map(({ to, label }) => {
+              const active = to === "/" ? pathname === "/" : pathname.startsWith(to);
+              const isWick = to === "/";
+              const badge = isWick ? unseen : 0;
+              const live = isWick && !prefs.paused && status.market !== "idle";
+              const degradedDot = isWick && status.market !== "open";
+              return (
+                <NavLink
+                  key={to}
+                  to={to}
+                  className={cn(
+                    "num relative rounded-[3px] px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.1em] transition-colors",
+                    active
+                      ? "bg-primary/12 text-primary"
+                      : "text-muted-foreground hover:bg-secondary hover:text-foreground",
+                  )}
+                >
+                  {label}
+                  {badge > 0 ? (
+                    <span className="absolute -right-0.5 -top-0.5 grid h-[14px] min-w-[14px] place-items-center rounded-full bg-primary px-[3px] text-[8.5px] font-bold leading-none text-primary-foreground">
+                      {badge > 99 ? "99+" : badge}
+                    </span>
+                  ) : null}
+                  {badge === 0 && live ? (
+                    <span
+                      className={cn(
+                        "absolute right-0.5 top-0.5 h-1 w-1 rounded-full",
+                        degradedDot ? "bg-warn" : "bg-pos/70",
+                      )}
+                    />
+                  ) : null}
+                </NavLink>
+              );
+            })}
+          </nav>
+
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            {armedCount > 0 ? (
+              <span className="num rounded-[2px] border border-neg/40 bg-neg-soft px-1.5 py-[2px] text-[9.5px] font-semibold uppercase tracking-[0.1em] text-neg">
+                {armedCount} armed
+              </span>
+            ) : null}
+            <span className="num hidden text-[10.5px] uppercase tracking-[0.1em] text-muted-foreground sm:block">
+              {session?.username}
+            </span>
+            <button
+              type="button"
+              onClick={signOut}
+              aria-label="Sign out"
+              className="grid h-7 w-7 place-items-center rounded-[3px] text-muted-foreground transition-colors hover:bg-secondary hover:text-neg"
+            >
+              <LogOut className="h-[14px] w-[14px]" />
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main className="mx-auto w-full max-w-[1440px] px-4 py-4">{children}</main>
+    </div>
+  );
+}

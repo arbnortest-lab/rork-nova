@@ -1,0 +1,357 @@
+//@version=6
+// ═══════════════════════════════════════════════════════════════════════════
+//  NOVA VWAP DISTANCE FILTER PRO  ·  v2.0
+//  ---------------------------------------------------------------------
+//  Filtër distance nga VWAP me tre njësi matjeje, kufij adaptivë dhe
+//  sinjale kthimi (mean reversion).
+//
+//  Çfarë e ndryshon nga versioni bazë:
+//    1. Distanca matet e SHENJUAR (sipër / poshtë), jo vetëm absolute.
+//    2. Tre njësi matjeje: Përqindje, Sigma (devijim standard i VWAP), ATR.
+//       Sigma dhe ATR përshtaten vetë me volatilitetin e instrumentit —
+//       5% nuk do të thotë e njëjta gjë në BTC dhe në një altcoin.
+//    3. Kufij "Auto (Percentil)": ekstremi përkufizohet nga historiku i
+//       vetë instrumentit, jo nga një numër fiks.
+//    4. Sinjale kthimi: armatoset kur çmimi zgjatet, shkrepet kur kthehet.
+//    5. Alerte reale (statike + dinamike për webhook).
+//    6. Dashboard i plotë me rangun percentil dhe gjendjen e armatimit.
+//
+//  KUJDES: VWAP kërkon të dhëna volumi. Në simbole pa volum (disa indekse
+//  dhe çifte forex) TradingView nuk mund ta llogarisë.
+// ═══════════════════════════════════════════════════════════════════════════
+
+indicator("Nova VWAP Distance Filter Pro", "NOVA VWAP", overlay = true, max_labels_count = 500)
+
+// ── Grupet e inputeve ──────────────────────────────────────────────────────
+G_ANC = "1 · Ankorimi"
+G_MET = "2 · Njësia e matjes"
+G_LVL = "3 · Kufijtë e distancës"
+G_SIG = "4 · Sinjalet e kthimit"
+G_VIS = "5 · Pamja"
+G_TBL = "6 · Dashboard"
+
+// ── 1 · Ankorimi ───────────────────────────────────────────────────────────
+anchorMode = input.string("Sesioni", "Ankora e VWAP", options = ["Sesioni", "Dita", "Java", "Muaji"], group = G_ANC, tooltip = "Kur rinisë llogaritja e VWAP. 'Sesioni' është standardi. 'Java'/'Muaji' e bëjnë VWAP-in shumë më të ngadaltë dhe distancat natyrshëm më të mëdha.")
+vwapSrc = input.source(hlc3, "Burimi i VWAP", group = G_ANC, tooltip = "hlc3 është burimi standard i TradingView për VWAP. Versioni bazë përdorte 'close', që e bën VWAP-in pak më të zhurmshëm.")
+
+// ── 2 · Njësia e matjes ────────────────────────────────────────────────────
+metricMode = input.string("Përqindje (%)", "Mat distancën në", options = ["Përqindje (%)", "Sigma (σ)", "ATR"], group = G_MET, tooltip = "Përqindje: e thjeshtë, por 5% nuk është e krahasueshme mes instrumenteve.\nSigma: sa devijime standarde larg VWAP — përshtatet vetë me instrumentin dhe me kohëzgjatjen.\nATR: distanca në shumëfisha të ATR — e lidhur me lëvizjen tipike të barit.")
+atrLen = input.int(14, "Gjatësia e ATR", minval = 1, group = G_MET)
+
+// ── 3 · Kufijtë ────────────────────────────────────────────────────────────
+thrMode = input.string("Manual", "Burimi i kufijve", options = ["Manual", "Auto (Percentil)"], group = G_LVL, tooltip = "Manual: numra fiks që i vendos ti.\nAuto: kufijtë llogariten nga shpërndarja historike e distancës së vetë instrumentit. 'EKSTREM' bëhet 'në 7% më të largët të historikut', jo '10%'.")
+
+pctNear = input.float(1.5, "% · I afërt (pavalid)", minval = 0.0, step = 0.1, group = G_LVL)
+pctMin = input.float(5.0, "% · Valid nga", minval = 0.0, step = 0.1, group = G_LVL)
+pctMax = input.float(10.0, "% · Ekstrem nga", minval = 0.0, step = 0.1, group = G_LVL)
+
+sigNear = input.float(0.5, "σ · I afërt (pavalid)", minval = 0.0, step = 0.1, group = G_LVL)
+sigMin = input.float(1.5, "σ · Valid nga", minval = 0.0, step = 0.1, group = G_LVL)
+sigMax = input.float(2.5, "σ · Ekstrem nga", minval = 0.0, step = 0.1, group = G_LVL)
+
+atrNear = input.float(0.5, "ATR · I afërt (pavalid)", minval = 0.0, step = 0.1, group = G_LVL)
+atrMin = input.float(2.0, "ATR · Valid nga", minval = 0.0, step = 0.1, group = G_LVL)
+atrMax = input.float(4.0, "ATR · Ekstrem nga", minval = 0.0, step = 0.1, group = G_LVL)
+
+pLook = input.int(500, "Auto · dritarja (bare)", minval = 50, maxval = 2000, group = G_LVL)
+pNear = input.float(40.0, "Auto · percentili i afërt", minval = 1.0, maxval = 99.0, group = G_LVL)
+pMinI = input.float(75.0, "Auto · percentili valid", minval = 1.0, maxval = 99.0, group = G_LVL)
+pMaxI = input.float(93.0, "Auto · percentili ekstrem", minval = 1.0, maxval = 99.0, group = G_LVL)
+
+// ── 4 · Sinjalet ───────────────────────────────────────────────────────────
+showSignals = input.bool(true, "Shfaq sinjalet e kthimit", group = G_SIG)
+needExtreme = input.bool(false, "Armatos vetëm nga zona EKSTREME", group = G_SIG, tooltip = "I ndezur: sinjal vetëm pasi çmimi ka prekur zonën ekstreme. Shumë më pak sinjale, cilësi më e lartë.")
+needBarConf = input.bool(true, "Kërko bar konfirmues në drejtim të kthimit", group = G_SIG)
+confirmClose = input.bool(true, "Vlerëso vetëm në mbyllje të barit", group = G_SIG, tooltip = "Parandalon shfaqjen dhe zhdukjen e sinjalit brenda barit në formim.")
+cooldown = input.int(10, "Ftohje mes sinjaleve (bare)", minval = 0, group = G_SIG)
+alertsOn = input.bool(false, "Dërgo alert dinamik (webhook)", group = G_SIG)
+
+// ── 5 · Pamja ──────────────────────────────────────────────────────────────
+showBands = input.bool(true, "Shfaq bandat", group = G_VIS)
+showFills = input.bool(true, "Mbush zonat", group = G_VIS)
+colorBars = input.bool(false, "Ngjyros barët sipas statusit", group = G_VIS)
+tintBg = input.bool(true, "Hije në zonën ekstreme", group = G_VIS)
+colVwap = input.color(#f5c542, "Ngjyra · VWAP", group = G_VIS)
+colNear = input.color(#ef4444, "Ngjyra · Pavalid", group = G_VIS)
+colNeut = input.color(#f59e0b, "Ngjyra · Neutral", group = G_VIS)
+colVal = input.color(#a3e635, "Ngjyra · Valid", group = G_VIS)
+colExt = input.color(#22c55e, "Ngjyra · Ekstrem", group = G_VIS)
+
+// ── 6 · Dashboard ──────────────────────────────────────────────────────────
+showTable = input.bool(true, "Shfaq dashboard-in", group = G_TBL)
+compact = input.bool(false, "Modaliteti kompakt", group = G_TBL)
+tblPosIn = input.string("Lart djathtas", "Pozicioni", options = ["Lart djathtas", "Lart majtas", "Poshtë djathtas", "Poshtë majtas", "Mes djathtas", "Mes majtas"], group = G_TBL)
+tblSizeIn = input.string("E vogël", "Madhësia", options = ["E imët", "E vogël", "Normale", "E madhe"], group = G_TBL)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  LLOGARITJA E VWAP DHE E DEVIJIMIT STANDARD
+// ═══════════════════════════════════════════════════════════════════════════
+
+anchorCond = switch anchorMode
+    "Dita" => timeframe.change("D")
+    "Java" => timeframe.change("W")
+    "Muaji" => timeframe.change("M")
+    => session.isfirstbar_regular
+
+// Një thirrje e vetme na jep VWAP-in dhe të dyja bandat 1σ; prej tyre
+// nxjerrim sigma-n dhe ndërtojmë çdo bandë tjetër pa thirrje shtesë.
+[vwapVal, vwapUp1, vwapDn1] = ta.vwap(vwapSrc, anchorCond, 1.0)
+sigmaVal = nz((vwapUp1 - vwapDn1) / 2.0)
+atrVal = nz(ta.atr(atrLen))
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  DISTANCA — E SHENJUAR DHE E NORMALIZUAR
+// ═══════════════════════════════════════════════════════════════════════════
+
+diff = close - vwapVal
+distPct = vwapVal != 0.0 ? diff / vwapVal * 100.0 : 0.0
+distSig = sigmaVal > 0.0 ? diff / sigmaVal : 0.0
+distAtr = atrVal > 0.0 ? diff / atrVal : 0.0
+
+aPct = math.abs(distPct)
+aSig = math.abs(distSig)
+aAtr = math.abs(distAtr)
+
+metric = switch metricMode
+    "Sigma (σ)" => aSig
+    "ATR" => aAtr
+    => aPct
+
+unitTxt = metricMode == "Sigma (σ)" ? "σ" : metricMode == "ATR" ? "×ATR" : "%"
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  KUFIJTË — MANUAL OSE PERCENTIL ADAPTIV
+// ═══════════════════════════════════════════════════════════════════════════
+
+mNear = switch metricMode
+    "Sigma (σ)" => sigNear
+    "ATR" => atrNear
+    => pctNear
+
+mMin = switch metricMode
+    "Sigma (σ)" => sigMin
+    "ATR" => atrMin
+    => pctMin
+
+mMax = switch metricMode
+    "Sigma (σ)" => sigMax
+    "ATR" => atrMax
+    => pctMax
+
+// Percentilet llogariten gjithmonë — edhe në modalitet manual, sepse
+// rangu i distancës aktuale shfaqet në dashboard si kontekst.
+autoNear = ta.percentile_linear_interpolation(metric, pLook, pNear)
+autoMin = ta.percentile_linear_interpolation(metric, pLook, pMinI)
+autoMax = ta.percentile_linear_interpolation(metric, pLook, pMaxI)
+rankVal = ta.percentrank(metric, pLook)
+
+useAuto = thrMode == "Auto (Percentil)"
+rNear = useAuto ? autoNear : mNear
+rMin = useAuto ? autoMin : mMin
+rMax = useAuto ? autoMax : mMax
+
+// Renditja detyrohet: i afërt ≤ valid ≤ ekstrem. Kështu inputet e
+// pakujdesshme nuk prodhojnë kurrë një zonë të pamundur.
+tNear = nz(rNear)
+tMin = math.max(nz(rMin), tNear)
+tMax = math.max(nz(rMax), tMin)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  STATUSI
+//  0 = pavalid · 1 = neutral · 2 = valid · 3 = ekstrem
+// ═══════════════════════════════════════════════════════════════════════════
+
+statusId = metric <= tNear ? 0 : metric >= tMax ? 3 : metric >= tMin ? 2 : 1
+
+statusCol = switch statusId
+    0 => colNear
+    2 => colVal
+    3 => colExt
+    => colNeut
+
+fmtU(v) =>
+    str.tostring(v, "#.##") + unitTxt
+
+// Etiketat ndërtohen nga kufijtë REALË. Versioni bazë kishte tekst të
+// ngurtësuar ("VALID (5% - 10%)") që nuk ndryshonte kur ndryshoje inputet.
+statusTxt = switch statusId
+    0 => "PAVALID (≤ " + fmtU(tNear) + ")"
+    3 => "EKSTREM (≥ " + fmtU(tMax) + ")"
+    2 => "VALID (" + fmtU(tMin) + " – " + fmtU(tMax) + ")"
+    => "NEUTRAL (" + fmtU(tNear) + " – " + fmtU(tMin) + ")"
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  NIVELET E BANDAVE
+//  Një funksion i vetëm përkthen çdo kufi në çmim, sipas njësisë aktive.
+// ═══════════════════════════════════════════════════════════════════════════
+
+levelAt(mult, isUp) =>
+    sgn = isUp ? 1.0 : -1.0
+    switch metricMode
+        "Sigma (σ)" => vwapVal + sgn * mult * sigmaVal
+        "ATR" => vwapVal + sgn * mult * atrVal
+        => vwapVal * (1.0 + sgn * mult / 100.0)
+
+upNear = levelAt(tNear, true)
+dnNear = levelAt(tNear, false)
+upMin = levelAt(tMin, true)
+dnMin = levelAt(tMin, false)
+upMax = levelAt(tMax, true)
+dnMax = levelAt(tMax, false)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  SINJALET E KTHIMIT
+//  Zgjatja e vetme nuk është hyrje. Sinjali lind kur çmimi i zgjatur
+//  kthehet brenda bandës — pra kur lëvizja dorëzohet.
+// ═══════════════════════════════════════════════════════════════════════════
+
+isAbove = close > vwapVal
+armLevel = needExtreme ? 3 : 2
+
+var bool armedS = false
+var bool armedL = false
+var int lastSigBar = na
+var float sessMax = 0.0
+
+sessMax := anchorCond ? metric : math.max(nz(sessMax), metric)
+
+// Kryqëzimet llogariten pa kushte, që gjendja e tyre e brendshme të mos
+// prishet kur armatimi është i fikur.
+crossInDown = ta.crossunder(close, upMin)
+crossInUp = ta.crossover(close, dnMin)
+
+barOkS = not needBarConf or close < open
+barOkL = not needBarConf or close > open
+evalOk = not confirmClose or barstate.isconfirmed
+coolOk = na(lastSigBar) or (bar_index - lastSigBar) >= cooldown
+
+rawS = armedS and crossInDown
+rawL = armedL and crossInUp
+
+sigShort = rawS and barOkS and evalOk and coolOk
+sigLong = rawL and barOkL and evalOk and coolOk
+
+if sigShort or sigLong
+    lastSigBar := bar_index
+
+// Çarmatimi ndodh sapo kthimi prek bandën, edhe nëse filtrat e bllokuan
+// sinjalin — përndryshe i njëjti zgjatim do të shkrepte disa herë.
+if rawS
+    armedS := false
+if rawL
+    armedL := false
+
+if statusId >= armLevel
+    if isAbove
+        armedS := true
+    else
+        armedL := true
+
+// Kthimi te VWAP e mbyll ciklin.
+if statusId == 0
+    armedS := false
+    armedL := false
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  VIZATIMI
+// ═══════════════════════════════════════════════════════════════════════════
+
+plot(vwapVal, "VWAP", color = colVwap, linewidth = 2)
+
+pUN = plot(showBands ? upNear : na, "I afërt +", color = color.new(colNear, 55))
+pDN = plot(showBands ? dnNear : na, "I afërt −", color = color.new(colNear, 55))
+pUM = plot(showBands ? upMin : na, "Valid +", color = color.new(colVal, 35))
+pDM = plot(showBands ? dnMin : na, "Valid −", color = color.new(colVal, 35))
+pUX = plot(showBands ? upMax : na, "Ekstrem +", color = color.new(colExt, 15))
+pDX = plot(showBands ? dnMax : na, "Ekstrem −", color = color.new(colExt, 15))
+
+fill(pUN, pDN, color = showFills ? color.new(colNear, 93) : na, title = "Zona pavalide")
+fill(pUM, pUX, color = showFills ? color.new(colVal, 90) : na, title = "Zona valide sipër")
+fill(pDM, pDX, color = showFills ? color.new(colVal, 90) : na, title = "Zona valide poshtë")
+
+barcolor(colorBars ? statusCol : na, title = "Ngjyra e barëve")
+bgcolor(tintBg and statusId == 3 ? color.new(statusCol, 92) : na, title = "Hije ekstreme")
+
+plotshape(showSignals and sigShort, "Kthim SHORT", shape.triangledown, location.abovebar, #ef4444, text = "S", textcolor = color.white, size = size.tiny)
+plotshape(showSignals and sigLong, "Kthim LONG", shape.triangleup, location.belowbar, #22c55e, text = "L", textcolor = color.white, size = size.tiny)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  DASHBOARD
+// ═══════════════════════════════════════════════════════════════════════════
+
+tblPos = switch tblPosIn
+    "Lart majtas" => position.top_left
+    "Poshtë djathtas" => position.bottom_right
+    "Poshtë majtas" => position.bottom_left
+    "Mes djathtas" => position.middle_right
+    "Mes majtas" => position.middle_left
+    => position.top_right
+
+tblSize = switch tblSizeIn
+    "E imët" => size.tiny
+    "Normale" => size.normal
+    "E madhe" => size.large
+    => size.small
+
+addRow(arrL, arrV, arrC, l, v, c) =>
+    array.push(arrL, l)
+    array.push(arrV, v)
+    array.push(arrC, c)
+
+signed(v, suffix) =>
+    (v >= 0 ? "+" : "") + str.tostring(v, "#.##") + suffix
+
+var table dash = table.new(tblPos, 2, 12, bgcolor = color.new(#0b0e13, 12), border_color = color.new(#3a4150, 40), border_width = 1, frame_color = color.new(#3a4150, 20), frame_width = 1)
+
+if barstate.islast and showTable
+    table.clear(dash, 0, 0, 1, 11)
+
+    lab = array.new_string(0)
+    val = array.new_string(0)
+    cls = array.new_color(0)
+
+    addRow(lab, val, cls, "NOVA VWAP PRO", str.upper(timeframe.period), #9aa4b2)
+    addRow(lab, val, cls, "Çmimi", str.tostring(close, format.mintick), #e6edf3)
+    addRow(lab, val, cls, "VWAP", str.tostring(vwapVal, format.mintick), colVwap)
+    addRow(lab, val, cls, "Distanca", signed(distPct, "%"), statusCol)
+
+    if not compact
+        addRow(lab, val, cls, "Distanca σ", signed(distSig, "σ"), statusCol)
+        addRow(lab, val, cls, "Distanca ATR", signed(distAtr, "×"), statusCol)
+        addRow(lab, val, cls, "Rangu historik", str.tostring(rankVal, "#") + "%", #9aa4b2)
+
+    addRow(lab, val, cls, "Statusi", statusTxt, statusCol)
+    addRow(lab, val, cls, "Drejtimi", isAbove ? "SIPËR VWAP" : "POSHTË VWAP", isAbove ? colNear : colExt)
+
+    if not compact
+        addRow(lab, val, cls, "Kufijtë", fmtU(tMin) + " – " + fmtU(tMax) + (useAuto ? " ·auto" : ""), #9aa4b2)
+        addRow(lab, val, cls, "Max i ankorës", fmtU(sessMax), #9aa4b2)
+
+    addRow(lab, val, cls, "Gjendja", armedS ? "ARMATUAR ▼ short" : armedL ? "ARMATUAR ▲ long" : "në pritje", armedS ? colNear : armedL ? colExt : #6b7280)
+
+    for i = 0 to array.size(lab) - 1
+        isHead = i == 0
+        table.cell(dash, 0, i, array.get(lab, i), text_color = isHead ? #e6edf3 : #9aa4b2, text_size = tblSize, text_halign = text.align_left, bgcolor = isHead ? color.new(#1a2029, 20) : na)
+        table.cell(dash, 1, i, array.get(val, i), text_color = array.get(cls, i), text_size = tblSize, text_halign = text.align_right, bgcolor = isHead ? color.new(#1a2029, 20) : na)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ALERTET
+// ═══════════════════════════════════════════════════════════════════════════
+
+enterExtreme = statusId == 3 and nz(statusId[1], 0) < 3
+enterValid = statusId >= 2 and nz(statusId[1], 0) < 2
+
+alertcondition(sigShort, "Kthim SHORT nga VWAP", "NOVA VWAP · kthim SHORT te {{ticker}} në çmimin {{close}}")
+alertcondition(sigLong, "Kthim LONG nga VWAP", "NOVA VWAP · kthim LONG te {{ticker}} në çmimin {{close}}")
+alertcondition(enterExtreme, "Hyri në zonën EKSTREME", "NOVA VWAP · {{ticker}} në distancë ekstreme nga VWAP")
+alertcondition(enterValid, "Hyri në zonën VALIDE", "NOVA VWAP · {{ticker}} hyri në zonën valide")
+
+if alertsOn and (sigShort or sigLong)
+    string side = sigShort ? "SHORT" : "LONG"
+    string msg = "NOVA VWAP · " + side + " · " + syminfo.ticker + " " + timeframe.period
+    msg += " · çmimi " + str.tostring(close, format.mintick)
+    msg += " · VWAP " + str.tostring(vwapVal, format.mintick)
+    msg += " · dist " + str.tostring(distPct, "#.##") + "% (" + str.tostring(distSig, "#.##") + "σ)"
+    msg += " · rangu " + str.tostring(rankVal, "#") + "%"
+    msg += " · " + statusTxt
+    alert(msg, alert.freq_once_per_bar_close)

@@ -1,0 +1,256 @@
+// =====================================================================
+//  NOVA EXHAUSTION TRAP  ·  v1.2  ·  Pine Script v6
+// ---------------------------------------------------------------------
+//  Bull traps at the 24h high. Shorts only.
+//
+//  One model, four gates, no partial credit, ONE DIRECTION. A signal
+//  prints only when an asset has run completely out of fuel at the
+//  rolling 24h HIGH:
+//
+//    1. PIN        the bar reaches, sweeps or pins the prior rolling
+//                  24h high
+//    2. CLIMAX     relative volume spikes past the climax threshold AND
+//                  is cooling, so the surge is spent, not still building
+//    3. TRAP       that same bar posts a higher high and is immediately
+//                  rejected, the upper wick taking at least 45% of the
+//                  candle's total range  (the failed breakout)
+//    4. DEPLETION  the long-horizon high is reached too, so there is no
+//                  resting liquidity left above to expand into
+//
+//  All four must hold on the same bar. Three of four is not a signal.
+//
+//  BEAR TRAPS AND LONG SIGNALS ARE OUT OF SCOPE BY DESIGN. Nothing in
+//  this script measures the 24h low, and there is no long branch to
+//  switch on: a capitulation low cannot produce a signal here, however
+//  clean it looks.
+//
+//  Every gate is measured against the bar's own HIGH, never its close. A
+//  rejection wick closes far below the level it swept by definition, so
+//  testing the close would make gates 1 and 4 contradict gate 3.
+//
+//  Non-repainting: all gates read closed history (prior windows are
+//  offset by one bar, the daily request uses lookahead_off and reads
+//  completed days). Leave "Confirm on bar close" on for live use.
+//
+//  Intended for intraday charts (1m - 12h). The 24h window is counted in
+//  bars, so a daily or higher chart has no rolling 24h to measure and is
+//  rejected.
+// =====================================================================
+
+//@version=6
+indicator("Nova Exhaustion Trap", "NOVA EXH", overlay = true, max_labels_count = 500)
+
+// ---------------------------------------------------------------------
+// Inputs
+// ---------------------------------------------------------------------
+
+grpGates = "Exhaustion gates"
+pinBps       = input.float(5.0,   "1 · Reach (bps short of the 24h high)", minval = 0.5, maxval = 100.0, step = 0.5, group = grpGates, tooltip = "How close the bar's high must come to the prior rolling 24h high. 5 bps = 0.05%. A bar that trades through the level scores zero.")
+rvolClimax   = input.float(300.0, "2 · Volume climax (RVOL %)",            minval = 150.0, maxval = 2000.0, step = 10.0, group = grpGates, tooltip = "Relative volume against the recent average. 300 = three times normal for this market.")
+wickMin      = input.float(45.0,  "3 · Rejection wick (% of range)",       minval = 45.0, maxval = 95.0, step = 1.0, group = grpGates, tooltip = "The upper rejection wick as a share of the trap candle's total high-low range. The specification floor is 45%.")
+depletionPct = input.float(0.5,   "4 · Depletion band (% from horizon)",   minval = 0.0, maxval = 10.0, step = 0.1, group = grpGates, tooltip = "How close the bar's high must come to the long-horizon high for the upside liquidity pool to count as swept.")
+
+grpWindows = "Windows"
+horizonDays  = input.int(365, "Liquidity horizon (daily bars)", minval = 30, maxval = 500, group = grpWindows, tooltip = "Completed trading days behind the long-horizon high used by gate 4.")
+rvolLookback = input.int(96,  "RVOL baseline (bars)",           minval = 10, maxval = 500, group = grpWindows, tooltip = "Bars behind the average volume that RVOL is measured against.")
+trapLookback = input.int(12,  "Trap lookback (bars)",           minval = 3,  maxval = 100, group = grpWindows, tooltip = "The window a bar must extend above to count as a higher high.")
+cooldownBars = input.int(20,  "Cooldown (bars)",                minval = 0,  maxval = 500, group = grpWindows, tooltip = "Bars before another short may signal. Stops one exhaustion event printing on every bar of the reversal.")
+
+grpBehaviour = "Behaviour"
+confirmClose = input.bool(true, "Confirm on bar close", group = grpBehaviour, tooltip = "On: a signal appears only once the bar has closed and can never be repainted away. Off: it appears intrabar and may vanish if the bar recovers.")
+
+grpVisual = "Display"
+showRails    = input.bool(true, "24h high rail",           group = grpVisual)
+showHorizon  = input.bool(true, "Long-horizon high",       group = grpVisual)
+showNearMiss = input.bool(true, "Mark 3-of-4 near misses", group = grpVisual)
+showPanel    = input.bool(true, "Gate panel",              group = grpVisual)
+panelPos     = input.string("Top right", "Panel position", options = ["Top right", "Top left", "Bottom right", "Bottom left"], group = grpVisual)
+
+colShort = input.color(#ef4444, "Signal",  group = grpVisual, inline = "col")
+colPass  = input.color(#22c55e, "Passing", group = grpVisual, inline = "col")
+colIdle  = input.color(#6b7280, "Neutral", group = grpVisual, inline = "col")
+
+// ---------------------------------------------------------------------
+// Timeframe geometry
+//
+// The 24h window is a bar count, so the chart timeframe has to divide into a
+// day. `rawMinutes` falls back to a full day rather than zero so nothing ever
+// divides by zero on an unsupported chart; `tfSupported` then suppresses every
+// signal there anyway.
+// ---------------------------------------------------------------------
+
+rawMinutes = timeframe.isseconds ? timeframe.multiplier / 60.0 :
+             timeframe.isminutes ? timeframe.multiplier * 1.0  : 1440.0
+
+tfSupported = (timeframe.isseconds or timeframe.isminutes) and rawMinutes <= 720.0
+barsPerDay  = math.max(2, int(math.round(1440.0 / rawMinutes)))
+
+// ---------------------------------------------------------------------
+// GATE 1 — reached the rolling 24h high
+//
+// Measured against the PRIOR 24h window, offset by one bar. Comparing a bar to
+// a window that already contains it would make every new high score zero.
+//
+// Only the high is measured. There is no 24h-low branch anywhere in this
+// script.
+// ---------------------------------------------------------------------
+
+prior24High = ta.highest(high, barsPerDay)[1]
+
+// How far the bar's high fell short, in basis points. Trading through the
+// level floors at zero: a sweep is the most complete way of reaching it.
+reachBps    = not na(prior24High) and prior24High > 0 ? math.max(0.0, (prior24High - high) / prior24High * 10000.0) : na
+pinMeasured = not na(reachBps)
+pinPass     = pinMeasured and reachBps <= pinBps
+
+// ---------------------------------------------------------------------
+// GATE 2 — volume climax, then cooling
+//
+// Both halves are required. A spike that is still accelerating means the move
+// still has fuel behind it; exhaustion is a spike that has rolled over.
+// ---------------------------------------------------------------------
+
+volBase      = ta.sma(volume, rvolLookback)
+rvol         = not na(volBase) and volBase > 0 ? volume / volBase * 100.0 : na
+rvolMeasured = not na(rvol) and not na(rvol[1])
+climaxHit    = not na(rvol) and rvol >= rvolClimax
+cooling      = rvolMeasured and rvol <= rvol[1]
+climaxPass   = climaxHit and cooling
+
+// ---------------------------------------------------------------------
+// GATE 3 — the failed breakout
+//
+// Both halves again: a higher high AND a rejection. A long upper wick on a bar
+// that never took out the prior range is noise; a new high that closed strong
+// is continuation. Only the combination is a bull trap.
+// ---------------------------------------------------------------------
+
+priorHigh = ta.highest(high, trapLookback)[1]
+
+barRange     = high - low
+upperWick    = high - math.max(open, close)
+upperWickPct = barRange > 0 ? upperWick / barRange * 100.0 : 0.0
+
+madeHH   = not na(priorHigh) and high > priorHigh
+trapPass = madeHH and upperWickPct >= wickMin
+
+// ---------------------------------------------------------------------
+// GATE 4 — upside liquidity depletion
+//
+// Completed daily bars only (offset by one), so today cannot define its own
+// extreme. lookahead_off keeps the request honest: the value on any historical
+// bar is the value that was knowable at that moment.
+// ---------------------------------------------------------------------
+
+horizonHigh = request.security(syminfo.tickerid, "D", ta.highest(high, horizonDays)[1], lookahead = barmerge.lookahead_off)
+
+// The gate asserts price is AT the long-horizon high, so it is a band and both
+// sides fail. Far below leaves resting liquidity to expand into. Far above
+// means the level was swept long ago and price is in open-sky discovery with
+// nothing overhead left to exhaust. Clamping this distance at zero would let a
+// runaway breakout score a perfect pass, so the signed distance is kept and the
+// test is on its magnitude.
+horizonMeasured    = not na(horizonHigh) and horizonHigh > 0
+distHorizonHighPct = horizonMeasured ? (horizonHigh - high) / horizonHigh * 100.0 : na
+horizonGapPct      = horizonMeasured ? math.abs(distHorizonHighPct) : na
+depletionPass      = horizonMeasured and horizonGapPct <= depletionPct
+
+// ---------------------------------------------------------------------
+// Verdict
+// ---------------------------------------------------------------------
+
+allGates = pinPass and climaxPass and trapPass and depletionPass
+
+// A forming bar's volume is partial and its wick can still fill in, so live
+// evaluation is opt-in and the default waits for the close.
+barReady = confirmClose ? barstate.isconfirmed : true
+rawShort = tfSupported and allGates and barReady
+
+// Cooldown.
+var int lastShortBar = na
+shortReady  = na(lastShortBar) or (bar_index - lastShortBar) >= cooldownBars
+shortSignal = rawShort and shortReady
+
+if shortSignal
+    lastShortBar := bar_index
+
+// How many gates are open right now, for the panel and the near-miss marks.
+gatesOpen = (pinPass ? 1 : 0) + (climaxPass ? 1 : 0) + (trapPass ? 1 : 0) + (depletionPass ? 1 : 0)
+
+// ---------------------------------------------------------------------
+// Plots
+// ---------------------------------------------------------------------
+
+plot(showRails and tfSupported ? prior24High : na, "24h high", color = color.new(colShort, 55), linewidth = 1, style = plot.style_linebr)
+plot(showHorizon ? horizonHigh : na, "Horizon high", color = color.new(colShort, 78), linewidth = 2, style = plot.style_linebr)
+
+plotshape(shortSignal, "SHORT — bull trap at 24h high", shape.labeldown, location.abovebar, color = colShort, text = "SHORT", textcolor = color.white, size = size.small)
+
+// Three of four: not a trade, but worth a glance.
+nearMiss = showNearMiss and tfSupported and gatesOpen == 3 and not shortSignal and barReady
+plotshape(nearMiss, "3 of 4", shape.triangledown, location.abovebar, color = color.new(colShort, 45), size = size.tiny)
+
+barcolor(shortSignal ? colShort : na)
+
+// ---------------------------------------------------------------------
+// Gate panel
+// ---------------------------------------------------------------------
+
+markOf(bool passed, bool measured) =>
+    measured ? (passed ? "PASS" : "—") : "n/a"
+
+colourOf(bool passed, bool measured) =>
+    not measured ? colIdle : passed ? colPass : colIdle
+
+var table panel = table.new(
+     panelPos == "Top right"    ? position.top_right :
+     panelPos == "Top left"     ? position.top_left :
+     panelPos == "Bottom right" ? position.bottom_right : position.bottom_left,
+     3, 6, border_width = 1, border_color = color.new(color.gray, 70))
+
+if showPanel and barstate.islast
+    headColour = allGates ? colShort : colIdle
+
+    table.cell(panel, 0, 0, "NOVA EXHAUSTION", text_color = color.white, bgcolor = color.new(headColour, 25), text_size = size.small)
+    table.cell(panel, 1, 0, allGates ? "SHORT" : "watch", text_color = color.white, bgcolor = color.new(headColour, 25), text_size = size.small)
+    table.cell(panel, 2, 0, str.tostring(gatesOpen) + "/4", text_color = color.white, bgcolor = color.new(headColour, 25), text_size = size.small)
+
+    table.cell(panel, 0, 1, "1 · Reach 24h high", text_color = color.gray, text_size = size.tiny)
+    table.cell(panel, 1, 1, pinMeasured ? str.tostring(reachBps, "#.0") + " bps" : "—", text_color = color.white, text_size = size.tiny)
+    table.cell(panel, 2, 1, markOf(pinPass, pinMeasured), text_color = colourOf(pinPass, pinMeasured), text_size = size.tiny)
+
+    table.cell(panel, 0, 2, "2 · Climax & cooling", text_color = color.gray, text_size = size.tiny)
+    table.cell(panel, 1, 2, na(rvol) ? "—" : str.tostring(rvol, "#") + "%" + (cooling ? " v" : " ^"), text_color = color.white, text_size = size.tiny)
+    table.cell(panel, 2, 2, markOf(climaxPass, rvolMeasured), text_color = colourOf(climaxPass, rvolMeasured), text_size = size.tiny)
+
+    table.cell(panel, 0, 3, "3 · Failed breakout", text_color = color.gray, text_size = size.tiny)
+    table.cell(panel, 1, 3, madeHH ? str.tostring(upperWickPct, "#.0") + "%" : "no higher high", text_color = color.white, text_size = size.tiny)
+    table.cell(panel, 2, 3, markOf(trapPass, true), text_color = colourOf(trapPass, true), text_size = size.tiny)
+
+    table.cell(panel, 0, 4, "4 · Upside depletion", text_color = color.gray, text_size = size.tiny)
+    table.cell(panel, 1, 4, na(horizonGapPct) ? "—" : str.tostring(horizonGapPct, "#.00") + "%" + (distHorizonHighPct < 0 ? " over" : ""), text_color = color.white, text_size = size.tiny)
+    table.cell(panel, 2, 4, markOf(depletionPass, horizonMeasured), text_color = colourOf(depletionPass, horizonMeasured), text_size = size.tiny)
+
+    footer = tfSupported ? "Shorts only · all four gates required" : "Use an intraday timeframe (1m-12h)"
+    table.cell(panel, 0, 5, footer, text_color = tfSupported ? color.gray : colShort, text_size = size.tiny)
+    table.cell(panel, 1, 5, "", text_size = size.tiny)
+    table.cell(panel, 2, 5, "", text_size = size.tiny)
+
+// ---------------------------------------------------------------------
+// Alerts
+//
+// alertcondition() creates the classic entry in the alert dialog.
+// alert() additionally fires a dynamic message carrying the live numbers, so a
+// webhook receives the measurements rather than just "condition met".
+// ---------------------------------------------------------------------
+
+alertcondition(shortSignal, "Exhaustion SHORT", "Bull trap at the 24h high")
+
+if shortSignal
+    alert(
+         "SHORT · " + syminfo.ticker + " @ " + str.tostring(close, format.mintick) +
+         " | swept the 24h high " + str.tostring(prior24High, format.mintick) +
+         " | RVOL " + str.tostring(rvol, "#") + "% cooling" +
+         " | upper wick " + str.tostring(upperWickPct, "#.0") + "% of range" +
+         " | " + str.tostring(horizonDays) + "d upside liquidity swept",
+         alert.freq_once_per_bar_close)

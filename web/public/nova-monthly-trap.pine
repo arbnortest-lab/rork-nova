@@ -1,0 +1,1246 @@
+// =====================================================================
+//  NOVA MONTHLY TRAP  ·  v1.2  ·  Pine Script v6
+// ---------------------------------------------------------------------
+//  Daily-chart traps at MONTHLY levels, taken only in the right market
+//  and only when the trap day's own intrabars prove the rejection, with
+//  the day's volume profile read from the same intrabars. Longs and
+//  shorts.
+//
+//  THE TRAP (unchanged from v1.0)
+//  The levels come from completed months only, so nothing moves once it
+//  is drawn:
+//    · the previous month's high and low
+//    · monthly supply and demand zones. A month whose high stands above
+//      the highs of the two months on either side marks a supply zone; a
+//      month whose low stands below its neighbours' lows marks a demand
+//      zone. The zone runs from that extreme toward the month's candle
+//      body, never more than one daily ATR deep, and stays live until a
+//      daily candle CLOSES through it.
+//    · optionally the current month's open, and the previous quarter's
+//      and previous year's high and low (all off by default, see the
+//      testing notes)
+//  A trap needs all four gates on the same daily candle. For a long:
+//    1. LEVEL    the low reaches a monthly support and the candle closes
+//                back above it
+//    2. SWEEP    the low also takes out the lowest low of the prior 12
+//                days, so the stops resting under the level are run
+//    3. WICK     the lower wick is at least 45% of the candle's range
+//    4. VOLUME   volume is at least 250% of the prior 20-day average
+//  A short is the mirror image at the previous month high or a supply
+//  zone.
+//
+//  NEW IN v1.1
+//    0. REGIME   the trap must happen in the right market. The reference
+//                market is Bitcoin (BINANCE:BTCUSDT, daily) by default.
+//                Longs are taken only while it trades BELOW its RISING
+//                200-day average: a correction inside an uptrend, the
+//                moment forced selling runs the stops under monthly
+//                supports. Shorts are taken only while it trades below
+//                the average. The classic rule, longs above the average,
+//                was tested and lost money (see below).
+//    5. WICK PROOF  the volume climax must have happened in the wick,
+//                beyond the level, and the recovery must have had
+//                participation. Read from the trap day's intrabars (1h
+//                by default): at least 10% of the day's volume traded
+//                beyond the level, and the hours after the extreme
+//                carried at least half the volume of the hours up to it.
+//                Longs only by default; the proof did not help shorts.
+//    · QUARTER AND YEAR levels are drawn, and a trap landing on one of
+//      them is tagged "stacked" in the panel and the alert. Context, not
+//      a gate: stacked traps did not test better.
+//    · UNIVERSE NOTE  the Nova dashboard tracks Bitcoin plus altcoins
+//      priced strictly between $0.001 and $7.00. The panel says whether
+//      the chart in front of you is inside that band.
+//
+//  NEW IN v1.2
+//    6. INTRADAY VOLUME PROFILE  the day's intrabars are spread over 24
+//                price bins. The heaviest bin is the day's POC (point of
+//                control); bins holding at least 70% of it are high-
+//                volume nodes, merged into clusters where they touch.
+//                The last candle's profile is drawn as a histogram to
+//                the right of the chart, with the clusters as bands over
+//                the candle, coloured by the share of their volume that
+//                was bought (green), sold (red) or balanced (grey). One
+//                switch hides all of it.
+//    · CONFLUENCE  a trap whose rejection wick holds the POC is tagged.
+//                When the POC also sits BEYOND the monthly level, on the
+//                far side of the stop run, the signal is HIGH confluence:
+//                the day's heaviest trading happened past the level and
+//                the candle still closed back on the right side of it.
+//                Panel, label (LONG ★ / SHORT ★) and alert carry the
+//                tag. A tag by default; 'Require the confluence' turns
+//                it into a gate.
+//    · CAUTION   a wick that lands inside the PREVIOUS session's POC or
+//                cluster is flagged. It tested poorly on every set.
+//
+//  Shorts still wait for the NEXT daily candle to close below the trap
+//  candle's low. Longs print on the trap candle's own close. Both are
+//  switchable. Every signal carries a stop 0.25 ATR beyond the trap wick
+//  and a 2R target, and the panel keeps a record of how those trades
+//  played out on the chart in front of you.
+//
+//  WHAT THE TESTING SHOWED
+//  Same history as v1.0: 50 Binance USDT pairs, daily candles 2017-2026
+//  (354 coin-years), exit at the stop, the target or after 30 days,
+//  fees not included. The intrabar proof was read from 1h candles.
+//    · v1.0 for reference. Longs: 279 signals, 51% positive, +0.25R per
+//      trade. Confirmed shorts: 43 signals, 67% positive, +0.28R.
+//    · Regime alone. Longs while Bitcoin sat below its rising 200-day
+//      average: 100 signals, 70% positive, +0.74R, stopped out 16% of
+//      the time instead of 27%. The 179 longs it removed averaged
+//      -0.03R. It held on both halves of the sample (+0.77R / +0.71R),
+//      for every slope lookback from 5 to 60 days, and for averages of
+//      150 to 250 days (100 days did not work: +0.10R).
+//    · Regime + wick proof, the v1.1 defaults: 71 signals, about one
+//      per coin every five years, 76% positive, +0.92R, stopped out 13%
+//      of the time. Both halves: +0.93R / +0.90R. By period: 2020-21
+//      two signals +1.03R, 2022 fourteen +1.29R, 2023-24 forty-two
+//      +0.71R, 2025-26 thirteen +1.16R. The 29 traps the proof removed
+//      averaged +0.32R, so it trades some total profit for a cleaner
+//      signal; turn it off for more trades. Reading the proof from 2h
+//      or 4h candles gave the same result. In 2017-2019 four longs
+//      passed the regime and all four were stopped; the proof removed
+//      them, which is luck as much as design.
+//    · Shorts. The regime took confirmed shorts from +0.28R to +0.66R
+//      on 19 signals (74% positive). The proof did not help them.
+//    · Quarter and year levels. As extra trap levels they added 32 longs
+//      averaging +0.18R and 9 shorts averaging -0.28R, none of which
+//      passed the regime and the proof. Traps that landed on one of
+//      them averaged +0.14R against +0.28R for the rest, and +0.63R
+//      against +0.77R inside the regime. Drawn and tagged, not required.
+//    · The chart's own trend made a worse regime than Bitcoin's: the
+//      same rule on the chart symbol gave +0.28R.
+//    · v1.2 intraday profile, read from the same 1h intrabars on the 71
+//      v1.1 longs. The 40 whose POC sat inside the wick and beyond the
+//      level (★): 75% positive, +0.99R, half reached the target, 15%
+//      stopped (first half of the coins +0.71R, second half +1.15R). POC
+//      inside the wick but not beyond the level: 17 signals, +0.84R, 6%
+//      stopped. Only a cluster inside the wick: 13, +0.95R. No cluster
+//      inside the wick: one, stopped. Same picture with the proof off
+//      (100 regime longs: ★ 42 at +0.97R, 29 at +0.84R, 21 at +0.45R,
+//      8 at +0.01R) and on the 279 v1.0 longs (★ 100 at +0.46R, 100 at
+//      +0.06R, 50 at +0.33R, 29 at +0.06R). The ordering held on 12, 24
+//      and 40 bins and at 50% and 70% cluster thresholds. Shorts: 19 is
+//      too few to rank the tiers (★ 4 at +0.48R, POC inside 10 at
+//      +0.70R, cluster 3 at +1.57R, none 2 at -0.57R).
+//    · Yesterday's value. Traps whose wick landed inside the previous
+//      session's POC or cluster: 37 of the 279 v1.0 longs, 24% positive,
+//      -0.20R against +0.32R for the rest; 7 of the 100 regime longs at
+//      +0.21R against +0.78R; 6 of the 71 v1.1 longs at +0.41R against
+//      +0.96R; 9 of the 19 confirmed shorts at +0.03R against +1.22R.
+//      Flagged as caution, not blocked: inside the defaults the samples
+//      are small.
+//    · The buy/sell split of the POC carried no edge: v1.1 longs with a
+//      buy-dominant POC (55%+ bought) averaged +0.68R on 26, balanced
+//      +1.17R on 25, sell-dominant +1.16R on 6. The colours show where
+//      buyers were active; the tested edge is in WHERE the cluster sits.
+//  Forty of the fifty coins produced at least one v1.1 long, none more
+//  than five. Seventy-one trades is a small sample and 42 of them come
+//  from 2023-2024. Past results are not a promise.
+//
+//  NON-REPAINTING  levels use completed months, the regime is read from
+//  the same daily timeframe without lookahead, intrabars are complete
+//  when the daily candle closes, and nothing reads a future bar. The
+//  profile of a closed candle is fixed; the last candle's histogram
+//  grows with each new intrabar until the daily close. Built
+//  and tested for the 1D chart only; other timeframes show a notice.
+//  TradingView allows a fixed number of intrabars per chart (100,000 on
+//  most plans): with 1h intrabars that covers the last ~4,000 daily
+//  candles. Older candles cannot be proven and, by default, produce no
+//  signal.
+// =====================================================================
+
+//@version=6
+indicator("Nova Monthly Trap", "NOVA MTRAP", overlay = true, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
+
+// ---------------------------------------------------------------------
+// Inputs
+// ---------------------------------------------------------------------
+
+grpRegime   = "0 · Market regime"
+useRegime   = input.bool(true, "Require the market regime", group = grpRegime, tooltip = "Longs need the reference market below a rising average, shorts need it below the average. In testing this took longs from +0.25R to +0.74R per trade and confirmed shorts from +0.28R to +0.66R. The signals it removed averaged -0.03R.")
+regimeSym   = input.symbol("BINANCE:BTCUSDT", "Reference market", group = grpRegime, tooltip = "The market whose trend sets the regime. Bitcoin by default: the whole crypto market corrects when Bitcoin does, and Bitcoin's trend tested far better than the chart's own (+0.74R against +0.28R).")
+regimeOwn   = input.bool(false, "Use the chart symbol instead", group = grpRegime)
+regimeLen   = input.int(200, "Regime average (days)", minval = 20, maxval = 400, group = grpRegime, tooltip = "Simple moving average of the reference market's daily closes. 150 to 250 all tested well; 100 did not.")
+slopeLen    = input.int(20, "Slope lookback (days)", minval = 1, maxval = 120, group = grpRegime, tooltip = "The average is rising when it is higher than it was this many days ago. Every value from 5 to 60 tested about the same.")
+longRegime  = input.string("Below a rising average", "Longs need the reference", options = ["Below a rising average", "Below the average", "Above the average"], group = grpRegime, tooltip = "Below a rising average (default): a correction inside an uptrend, +0.74R on 100 signals. Below the average, any slope: +0.46R on 153. Above the average, the classic trend rule: -0.02R on 126; the same rule on the chart's own average: -0.16R.")
+shortRegime = input.string("Below the average", "Shorts need the reference", options = ["Below the average", "Below a falling average", "Above the average"], group = grpRegime, tooltip = "Below the average (default): +0.66R on 19 confirmed shorts. Below a falling average: +0.77R on 16. Above the average: +0.02R on 23.")
+
+grpGates = "1-4 · Trap gates"
+tolAtr   = input.float(0.25,  "1 · Level reach (× ATR)",          minval = 0.0,   maxval = 2.0,    step = 0.05, group = grpGates, tooltip = "How close the wick must come to a monthly level, in daily ATRs. 0 means it must touch the level itself. The candle still has to close back on the trapped side.")
+sweepLen = input.int(12,      "2 · Sweep lookback (days)",        minval = 2,     maxval = 100,                 group = grpGates, tooltip = "The wick must take out the lowest low (long) or the highest high (short) of this many prior daily candles.")
+wickMin  = input.float(45.0,  "3 · Rejection wick (% of range)",  minval = 45.0,  maxval = 95.0,   step = 1.0,  group = grpGates, tooltip = "The rejection wick as a share of the trap candle's high-low range. 45% is the floor.")
+rvolMin  = input.float(250.0, "4 · Volume climax (% of average)", minval = 100.0, maxval = 2000.0, step = 10.0, group = grpGates, tooltip = "Trap-candle volume against the average of the prior daily candles. 250 = two and a half times normal.")
+useVol   = input.bool(true,   "Require the volume gate",                                                        group = grpGates, tooltip = "Leave this on. Turn it off only on symbols with no volume data (most forex pairs and some indices). Signals then need one gate fewer, and the testing notes no longer apply.")
+
+grpProof   = "5 · Wick proof"
+useProof   = input.bool(true, "Require the wick proof (longs)", group = grpProof, tooltip = "Reads the trap day's intrabars. Passing needs both numbers below. Inside the regime it took longs from +0.74R to +0.92R per trade and the stop rate from 16% to 13%, at the price of 29 fewer signals (which averaged +0.32R).")
+proofShort = input.bool(false, "Require it for shorts too", group = grpProof, tooltip = "Off by default: on shorts the proof removed as many good trades as bad ones (+0.23R with it, +0.35R without).")
+proofTf    = input.timeframe("60", "Intrabar timeframe", group = grpProof, tooltip = "Shared with the intraday profile. 1h tested the defaults. 2h and 4h gave the same result and cover more history: TradingView allows a fixed number of intrabars per chart (100,000 on most plans), so 1h covers the last ~4,000 daily candles and 2h ~8,000.")
+beyondMin  = input.float(10.0, "Volume beyond the level (% of the day)", minval = 0.0, maxval = 100.0, step = 1.0, group = grpProof, tooltip = "Share of the day's volume that traded beyond the level, each intrabar's volume split in proportion to how much of its range lay beyond. 10% means the stop run was real, not a single print. On its own inside the regime, 5% to 25% tested between +0.79R and +0.87R.")
+afterMin   = input.float(50.0, "Volume after the extreme (% of the volume before it)", minval = 0.0, maxval = 500.0, step = 5.0, group = grpProof, tooltip = "Volume of the intrabars after the day's extreme against the volume up to and including it. 50% means the recovery had participation; a wick printed on one spike and then abandoned fails. On its own inside the regime, 25% to 100% tested between +0.74R and +0.86R.")
+proofMiss  = input.string("Skip the signal", "When intrabars are unavailable", options = ["Skip the signal", "Pass without the proof"], group = grpProof, tooltip = "Candles older than the intrabar budget cannot be proven. Skip keeps the signal set exactly what was tested. Pass lets them through as v1.0-style signals; the panel shows the proof as n/a on those candles. Applies to the profile too when it is made a gate.")
+
+grpVP      = "6 · Intraday volume profile"
+useVP      = input.bool(true, "Build the intraday profile", group = grpVP, tooltip = "Spreads each intrabar's volume across price bins to find where the day's volume clustered: the POC (the heaviest bin) and the high-volume clusters. Uses the same intrabars as the wick proof. A trap whose wick taps the POC or a cluster is tagged; 'Require the confluence' makes it a gate.")
+vpBins     = input.int(24, "Price bins across the day", minval = 6, maxval = 60, group = grpVP, tooltip = "The day's high-low range is cut into this many bins. 12, 24 and 40 tested the same; 24 is the default.")
+vpHvnPct   = input.float(70.0, "Cluster threshold (% of the POC bin)", minval = 30.0, maxval = 100.0, step = 5.0, group = grpVP, tooltip = "Bins holding at least this share of the POC bin's volume are high-volume nodes; touching bins merge into one cluster. 50% and 70% tested the same.")
+vpRequire  = input.string("Off · tag only", "Require the confluence", options = ["Off · tag only", "POC inside the wick", "High confluence"], group = grpVP, tooltip = "Off (default): the confluence is reported in the panel, the signal label and the alert, and never blocks a signal. POC inside the wick: on the v1.1 defaults 57 of the 71 longs, +0.94R instead of +0.92R. High confluence (POC inside the wick AND beyond the level): 40 longs, +0.99R, half of them reached the target. Too few shorts to rank.")
+vpShow     = input.bool(true, "Show the profile", group = grpVP, tooltip = "Master switch for every profile drawing. The panel row and the tags stay on.")
+vpShowHist = input.bool(true, "Histogram right of the last candle", group = grpVP)
+vpShowBand = input.bool(true, "Cluster bands over the last candle", group = grpVP)
+vpShowPrev = input.bool(true, "Yesterday's POC", group = grpVP, tooltip = "A dotted line at the previous session's POC. A trap wick that lands inside yesterday's value tested poorly on every set (see the header), so the tag says 'caution' when it does.")
+vpKeepTrap = input.bool(true, "Keep the cluster that caught a trap wick", group = grpVP, tooltip = "On a trap candle, the cluster inside the rejection wick is drawn forward for the holding period, so the demand or supply the trade stands on stays visible.")
+vpWidth    = input.int(12, "Profile width (bars)", minval = 3, maxval = 60, group = grpVP)
+
+grpLevels = "Monthly levels"
+usePM     = input.bool(true,  "Previous month high / low",              group = grpLevels)
+useZones  = input.bool(true,  "Monthly supply / demand zones",          group = grpLevels)
+useMO     = input.bool(false, "Current month open",                     group = grpLevels, tooltip = "Off by default. With it on, v1.0 testing gave slightly more signals and a slightly lower average (longs +0.23R instead of +0.25R).")
+useQY     = input.bool(false, "Previous quarter / year high and low",  group = grpLevels, tooltip = "Off by default. As extra trap levels they added 32 longs averaging +0.18R and 9 shorts averaging -0.28R, none of which passed the regime and the proof. They are always drawn (see Display) and a monthly trap landing on one of them is tagged as stacked.")
+pivLen    = input.int(2,      "Zone pivot strength (months each side)", minval = 1,   maxval = 6,                group = grpLevels, tooltip = "A supply zone needs a monthly high above this many months on each side, a demand zone a monthly low below them. The zone appears once those later months have closed.")
+zoneDepth = input.float(1.0,  "Zone depth cap (× daily ATR)",           minval = 0.1, maxval = 10.0, step = 0.1, group = grpLevels, tooltip = "A zone runs from the monthly extreme toward the candle body, but never deeper than this many daily ATRs. Keeps zones tight enough to act on.")
+maxZones  = input.int(10,     "Live zones kept per side",               minval = 1,   maxval = 30,               group = grpLevels)
+
+grpTrade  = "Signals and trade plan"
+sideMode  = input.string("Both", "Signals", options = ["Both", "Long only", "Short only"], group = grpTrade)
+confShort = input.bool(true,   "Shorts wait for a close below the trap low",  group = grpTrade, tooltip = "On: a short prints only when the next daily candle closes below the trap candle's low. In v1.0 testing this turned shorts from -0.15R to +0.28R per trade; with the regime they reach +0.66R.")
+confLong  = input.bool(false,  "Longs wait for a close above the trap high",  group = grpTrade, tooltip = "Off by default. In testing, waiting cut long signals by about 80% and removed their edge.")
+stopBuf   = input.float(0.25,  "Stop beyond the wick (× ATR)", minval = 0.0, maxval = 3.0,  step = 0.05, group = grpTrade)
+targetR   = input.float(2.0,   "Target (R multiple)",          minval = 0.5, maxval = 10.0, step = 0.25, group = grpTrade)
+holdBars  = input.int(30,      "Max hold (days)",              minval = 1,   maxval = 250,               group = grpTrade, tooltip = "A trade that reaches neither its stop nor its target is closed at the daily close after this many days. Drives the chart record and the drawn trade levels.")
+cooldown  = input.int(5,       "Cooldown (days)",              minval = 0,   maxval = 100,               group = grpTrade, tooltip = "Days before the same side may set up again.")
+
+grpWin  = "Windows"
+atrLen  = input.int(14, "ATR length",             minval = 2, maxval = 100, group = grpWin)
+rvolLen = input.int(20, "Volume baseline (days)", minval = 5, maxval = 200, group = grpWin)
+
+grpVis     = "Display"
+showPM     = input.bool(true,  "Monthly level lines",             group = grpVis)
+showQY     = input.bool(true,  "Quarter / year level lines",      group = grpVis)
+showZones  = input.bool(true,  "Zones",                           group = grpVis)
+showOld    = input.bool(false, "Keep mitigated zones",            group = grpVis)
+showTrades = input.bool(true,  "Trade levels and outcomes",       group = grpVis)
+showNear   = input.bool(true,  "Mark traps one gate short",       group = grpVis)
+showPanel  = input.bool(true,  "Gate panel",                      group = grpVis)
+panelPos   = input.string("Top right", "Panel position", options = ["Top right", "Top left", "Bottom right", "Bottom left"], group = grpVis)
+
+colLong  = input.color(#22c55e, "Long / demand",  group = grpVis, inline = "col")
+colShort = input.color(#ef4444, "Short / supply", group = grpVis, inline = "col")
+colIdle  = input.color(#6b7280, "Neutral",        group = grpVis, inline = "col")
+colPoc   = input.color(#f59e0b, "POC",            group = grpVis, tooltip = "The point of control: the price bin where the day traded the most volume.")
+
+grpBand  = "Dashboard universe"
+showBand = input.bool(true,   "Show the universe note", group = grpBand, tooltip = "The Nova dashboard tracks Bitcoin plus altcoins whose live price sits strictly between the floor and the ceiling below. The note says whether this chart is inside that band. It never blocks a signal.")
+bandMin  = input.float(0.001, "Band floor ($)",   minval = 0.0, step = 0.001, group = grpBand)
+bandMax  = input.float(7.0,   "Band ceiling ($)", minval = 0.0, step = 0.5,   group = grpBand)
+
+// ---------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------
+
+// One monthly zone. `born` is the time of the pivot month's first bar.
+type Zone
+    float top
+    float bot
+    int   born
+    box   bx
+
+// One open trade, followed bar by bar for the chart record.
+type Trade
+    int   side
+    int   entryBar
+    float entry
+    float stop
+    float target
+    float risk
+    line  stopLn
+    line  targetLn
+
+// Closed-trade tally for one side.
+type Record
+    int   n    = 0
+    int   wins = 0
+    float sumR = 0.0
+
+// ---------------------------------------------------------------------
+// Monthly candles, rebuilt from the daily bars
+//
+// Built on the chart itself instead of requested from the monthly
+// timeframe, so a month only enters the arrays once its last daily bar has
+// closed. No monthly value on any bar can come from the future.
+// ---------------------------------------------------------------------
+
+isDaily  = timeframe.isdaily and timeframe.multiplier == 1
+newMonth = timeframe.change("1M")
+
+var array<float> mOpen  = array.new<float>()
+var array<float> mHigh  = array.new<float>()
+var array<float> mLow   = array.new<float>()
+var array<float> mClose = array.new<float>()
+var array<int>   mTime  = array.new<int>()
+
+var float curOpen  = na
+var float curHigh  = na
+var float curLow   = na
+var float curClose = na
+var int   curTime  = na
+
+// The chart's first month is only whole when the chart starts on the 1st.
+var bool firstPartial = false
+if barstate.isfirst
+    firstPartial := dayofmonth(time) != 1
+
+// True on the first bar of a month when the month before it is complete.
+bool monthClosed = false
+if newMonth and not na(curOpen)
+    mOpen.push(curOpen)
+    mHigh.push(curHigh)
+    mLow.push(curLow)
+    mClose.push(curClose)
+    mTime.push(curTime)
+    monthClosed := true
+
+if newMonth or na(curOpen)
+    curOpen := open
+    curHigh := high
+    curLow  := low
+    curTime := time
+else
+    curHigh := math.max(curHigh, high)
+    curLow  := math.min(curLow, low)
+curClose := close
+
+nMonths = mHigh.size()
+pmHigh  = nMonths > 0 ? mHigh.last() : na
+pmLow   = nMonths > 0 ? mLow.last() : na
+
+// ---------------------------------------------------------------------
+// Quarters and years, assembled from the completed months
+//
+// A quarter enters once its third month has closed and the two before it
+// are the same quarter's; a year once December closes with all eleven
+// months before it present. A month missing from the data voids the
+// period rather than guessing it.
+// ---------------------------------------------------------------------
+
+var array<float> qHigh = array.new<float>()
+var array<float> qLow  = array.new<float>()
+var array<float> yHigh = array.new<float>()
+var array<float> yLow  = array.new<float>()
+
+if monthClosed
+    k     = nMonths - 1
+    kMo   = month(mTime.get(k))
+    kYr   = year(mTime.get(k))
+    first = firstPartial ? 1 : 0
+    if kMo % 3 == 0 and k - 2 >= first and month(mTime.get(k - 1)) == kMo - 1 and month(mTime.get(k - 2)) == kMo - 2 and year(mTime.get(k - 2)) == kYr
+        qHigh.push(math.max(mHigh.get(k), mHigh.get(k - 1), mHigh.get(k - 2)))
+        qLow.push(math.min(mLow.get(k), mLow.get(k - 1), mLow.get(k - 2)))
+    if kMo == 12 and k - 11 >= first
+        bool  whole = true
+        float yh    = mHigh.get(k)
+        float yl    = mLow.get(k)
+        for j = 1 to 11
+            if month(mTime.get(k - j)) != 12 - j or year(mTime.get(k - j)) != kYr
+                whole := false
+            yh := math.max(yh, mHigh.get(k - j))
+            yl := math.min(yl, mLow.get(k - j))
+        if whole
+            yHigh.push(yh)
+            yLow.push(yl)
+
+pqHigh = qHigh.size() > 0 ? qHigh.last() : na
+pqLow  = qLow.size() > 0 ? qLow.last() : na
+pyHigh = yHigh.size() > 0 ? yHigh.last() : na
+pyLow  = yLow.size() > 0 ? yLow.last() : na
+
+// ---------------------------------------------------------------------
+// Series used by the gates. All called on every bar, never conditionally.
+// ---------------------------------------------------------------------
+
+atr     = ta.atr(atrLen)
+atrPrev = atr[1]
+priorHi = ta.highest(high, sweepLen)[1]
+priorLo = ta.lowest(low, sweepLen)[1]
+volBase = ta.sma(volume, rvolLen)[1]
+
+// ---------------------------------------------------------------------
+// GATE 0 — the market regime
+//
+// Read from the reference market on the daily timeframe, without
+// lookahead. An unreadable reference (bad symbol, not enough history)
+// closes both sides rather than guessing.
+// ---------------------------------------------------------------------
+
+regimeTicker = regimeOwn ? syminfo.tickerid : regimeSym
+[refClose, refAvg, refAvgPrev] = request.security(regimeTicker, "D", [close, ta.sma(close, regimeLen), ta.sma(close[slopeLen], regimeLen)], lookahead = barmerge.lookahead_off, ignore_invalid_symbol = true)
+
+refOk     = not na(refClose) and not na(refAvg) and not na(refAvgPrev)
+refBelow  = refOk and refClose < refAvg
+refRising = refOk and refAvg > refAvgPrev
+refDist   = refOk ? (refClose - refAvg) / refAvg * 100.0 : na
+
+regimeLong  = not useRegime or (longRegime == "Below a rising average" ? refBelow and refRising : longRegime == "Below the average" ? refBelow : refOk and not refBelow)
+regimeShort = not useRegime or (shortRegime == "Below the average" ? refBelow : shortRegime == "Below a falling average" ? refBelow and not refRising : refOk and not refBelow)
+
+refName = regimeOwn ? syminfo.ticker : str.contains(regimeSym, ":") ? array.last(str.split(regimeSym, ":")) : regimeSym
+
+// ---------------------------------------------------------------------
+// Intrabars of the current daily candle, for the wick proof and the
+// volume profile. One request, so the intrabar budget is unchanged.
+// ---------------------------------------------------------------------
+
+[ibOpen, ibHigh, ibLow, ibClose, ibVol] = request.security_lower_tf(syminfo.tickerid, proofTf, [open, high, low, close, volume], ignore_invalid_timeframe = true)
+ibCount = na(ibOpen) or na(ibHigh) or na(ibLow) or na(ibClose) or na(ibVol) ? 0 : math.min(ibOpen.size(), math.min(ibHigh.size(), math.min(ibLow.size(), math.min(ibClose.size(), ibVol.size()))))
+
+var int proofSince = na
+if isDaily and ibCount >= 2 and na(proofSince)
+    proofSince := time
+
+// ---------------------------------------------------------------------
+// Monthly supply and demand zones
+//
+// A new zone can only form on the first bar of a month: the pivot month
+// sits `pivLen` months back so that the months after it have all closed.
+// The depth cap uses the ATR of the last closed daily bar.
+// ---------------------------------------------------------------------
+
+var array<Zone> supplyZones = array.new<Zone>()
+var array<Zone> demandZones = array.new<Zone>()
+
+zoneBox(float top, float bot, int born, bool isSupply) =>
+    box bx = na
+    if showZones
+        c  = isSupply ? colShort : colLong
+        bx := box.new(born, top, time, bot, xloc = xloc.bar_time, extend = extend.right, border_color = color.new(c, 55), bgcolor = color.new(c, 88), text = (isSupply ? "M supply · " : "M demand · ") + str.format_time(born, "MMM yy", syminfo.timezone), text_size = size.tiny, text_color = color.new(c, 25), text_halign = text.align_left, text_valign = isSupply ? text.align_top : text.align_bottom)
+    bx
+
+// A zone that is dropped or closed through either fades out or goes.
+retire(Zone z, bool mitigated) =>
+    if not na(z.bx)
+        if mitigated and showOld
+            z.bx.set_right(time)
+            z.bx.set_extend(extend.none)
+            z.bx.set_bgcolor(color.new(colIdle, 93))
+            z.bx.set_border_color(color.new(colIdle, 75))
+            z.bx.set_text_color(color.new(colIdle, 50))
+        else
+            z.bx.delete()
+
+if isDaily and useZones and monthClosed and not na(atrPrev)
+    p = nMonths - 1 - pivLen
+    if p - pivLen >= 0
+        hp     = mHigh.get(p)
+        lp     = mLow.get(p)
+        isHigh = true
+        isLow  = true
+        for k = 1 to pivLen
+            if mHigh.get(p - k) >= hp or mHigh.get(p + k) >= hp
+                isHigh := false
+            if mLow.get(p - k) <= lp or mLow.get(p + k) <= lp
+                isLow := false
+        cap     = zoneDepth * atrPrev
+        bodyTop = math.max(mOpen.get(p), mClose.get(p))
+        bodyBot = math.min(mOpen.get(p), mClose.get(p))
+        born    = mTime.get(p)
+        if isHigh
+            sBot = math.max(bodyTop, hp - cap)
+            supplyZones.push(Zone.new(hp, sBot, born, zoneBox(hp, sBot, born, true)))
+            if supplyZones.size() > maxZones
+                retire(supplyZones.shift(), false)
+        if isLow
+            dTop = math.min(bodyBot, lp + cap)
+            demandZones.push(Zone.new(dTop, lp, born, zoneBox(dTop, lp, born, false)))
+            if demandZones.size() > maxZones
+                retire(demandZones.shift(), false)
+
+// ---------------------------------------------------------------------
+// GATE 1 — a level reached and rejected
+//
+// Reached within the ATR tolerance, rejected on the close: a long needs the
+// close back above the level it tested, a short the close back below.
+// ---------------------------------------------------------------------
+
+tol   = tolAtr * atr
+supPM = usePM and not na(pmLow) and not na(atr) and low <= pmLow + tol and close > pmLow
+resPM = usePM and not na(pmHigh) and not na(atr) and high >= pmHigh - tol and close < pmHigh
+
+bool  demandHit = false
+float demHitTop = na
+float demHitBot = na
+for z in demandZones
+    if not demandHit and not na(atr) and low <= z.top + tol and close > z.bot
+        demandHit := true
+        demHitTop := z.top
+        demHitBot := z.bot
+
+bool  supplyHit = false
+float supHitTop = na
+float supHitBot = na
+for z in supplyZones
+    if not supplyHit and not na(atr) and high >= z.bot - tol and close < z.top
+        supplyHit := true
+        supHitTop := z.top
+        supHitBot := z.bot
+
+supMO = useMO and not na(curOpen) and not na(atr) and low <= curOpen + tol and close > curOpen
+resMO = useMO and not na(curOpen) and not na(atr) and high >= curOpen - tol and close < curOpen
+
+supPQ = useQY and not na(pqLow) and not na(atr) and low <= pqLow + tol and close > pqLow
+resPQ = useQY and not na(pqHigh) and not na(atr) and high >= pqHigh - tol and close < pqHigh
+supPY = useQY and not na(pyLow) and not na(atr) and low <= pyLow + tol and close > pyLow
+resPY = useQY and not na(pyHigh) and not na(atr) and high >= pyHigh - tol and close < pyHigh
+
+levelLong  = supPM or demandHit or supMO or supPQ or supPY
+levelShort = resPM or supplyHit or resMO or resPQ or resPY
+
+// The price the wick had to beat: the level, or the near edge of the zone.
+lvlLongPx  = supPM ? pmLow : demandHit ? demHitTop : supMO ? curOpen : supPQ ? pqLow : supPY ? pyLow : na
+lvlShortPx = resPM ? pmHigh : supplyHit ? supHitBot : resMO ? curOpen : resPQ ? pqHigh : resPY ? pyHigh : na
+
+// Stacked: a monthly trap whose extreme also sits on a quarter or year level.
+wide   = 2.0 * tol
+onPQL  = not na(pqLow) and not na(atr) and math.abs(low - pqLow) <= wide
+onPYL  = not na(pyLow) and not na(atr) and math.abs(low - pyLow) <= wide
+onPQH  = not na(pqHigh) and not na(atr) and math.abs(high - pqHigh) <= wide
+onPYH  = not na(pyHigh) and not na(atr) and math.abs(high - pyHigh) <= wide
+stackLong  = (supPM or demandHit or supMO) and (onPQL or onPYL)
+stackShort = (resPM or supplyHit or resMO) and (onPQH or onPYH)
+
+// ---------------------------------------------------------------------
+// GATES 2-4 — sweep, rejection wick, volume climax
+// ---------------------------------------------------------------------
+
+sweptLow  = not na(priorLo) and low < priorLo
+sweptHigh = not na(priorHi) and high > priorHi
+
+rng       = high - low
+dnWickPct = rng > 0 ? (math.min(open, close) - low) / rng * 100.0 : 0.0
+upWickPct = rng > 0 ? (high - math.max(open, close)) / rng * 100.0 : 0.0
+wickLong  = dnWickPct >= wickMin
+wickShort = upWickPct >= wickMin
+
+// An unmeasured volume gate never passes: no volume data means no signal
+// unless the gate is switched off on purpose.
+rvol        = not na(volume) and not na(volBase) and volBase > 0 ? volume / volBase * 100.0 : na
+volMeasured = not na(rvol)
+volPass     = volMeasured and rvol >= rvolMin
+volOk       = useVol ? volPass : true
+
+// ---------------------------------------------------------------------
+// GATE 5 — the wick proof
+//
+// Walks the day's intrabars once. Each intrabar's volume is split in
+// proportion to how much of its range lay beyond the level; the day's
+// extreme marks the turn, and the volume after it is set against the
+// volume up to and including it. Returns [measured, beyond %, after %].
+// ---------------------------------------------------------------------
+
+proofRead(bool isLong, float level, array<float> hs, array<float> ls, array<float> vs, int n) =>
+    float dayVol = 0.0
+    float beyond = 0.0
+    float extPx  = na
+    int   ext    = -1
+    if n > 0 and not na(level)
+        for j = 0 to n - 1
+            hj = hs.get(j)
+            lj = ls.get(j)
+            vj = vs.get(j)
+            if not (na(hj) or na(lj) or na(vj))
+                dayVol += vj
+                rj   = hj - lj
+                part = isLong ? math.max(0.0, math.min(level, hj) - lj) : math.max(0.0, hj - math.max(level, lj))
+                beyond += rj > 0 ? vj * part / rj : 0.0
+                px = isLong ? lj : hj
+                if na(extPx) or (isLong ? px < extPx : px > extPx)
+                    extPx := px
+                    ext   := j
+    float before = 0.0
+    float after  = 0.0
+    if ext >= 0
+        for j = 0 to n - 1
+            vj = vs.get(j)
+            if not na(vj)
+                if j <= ext
+                    before += vj
+                else
+                    after += vj
+    measured  = n >= 2 and ext >= 0 and dayVol > 0
+    beyondPct = measured ? beyond / dayVol * 100.0 : na
+    afterPct  = measured ? (before > 0 ? after / before * 100.0 : 0.0) : na
+    [measured, beyondPct, afterPct]
+
+[prMeasL, prBeyondL, prAfterL] = proofRead(true, lvlLongPx, ibHigh, ibLow, ibVol, ibCount)
+[prMeasS, prBeyondS, prAfterS] = proofRead(false, lvlShortPx, ibHigh, ibLow, ibVol, ibCount)
+
+prPassL = prMeasL and prBeyondL >= beyondMin and prAfterL >= afterMin
+prPassS = prMeasS and prBeyondS >= beyondMin and prAfterS >= afterMin
+// Without intrabars the gate only passes when told to; a level that was
+// reached but could not be measured is otherwise no signal.
+prMissOk    = ibCount < 2 and proofMiss == "Pass without the proof"
+proofLongOk  = not useProof or prPassL or prMissOk
+proofShortOk = not (useProof and proofShort) or prPassS or prMissOk
+
+// ---------------------------------------------------------------------
+// GATE 6 — the intraday volume profile
+//
+// The day's intrabars spread over `vpBins` price bins: each intrabar's
+// volume goes to the bins its range covers, in proportion to the overlap,
+// and the share of it that was bought is read from where the intrabar
+// closed within its range. The POC is the heaviest bin; bins holding at
+// least `vpHvnPct` of it are high-volume nodes, merged into clusters
+// where they touch. A tag by default, a gate only on request.
+// ---------------------------------------------------------------------
+
+// Returns [built, range low, bin height, bin volumes, bin bought volumes, POC bin, day volume].
+profileBuild(array<float> os, array<float> hs, array<float> ls, array<float> cs, array<float> vs, int n, int nb) =>
+    array<float> bv = array.new<float>(nb, 0.0)
+    array<float> bb = array.new<float>(nb, 0.0)
+    float lo     = na
+    float hi     = na
+    float dayVol = 0.0
+    int   poc    = -1
+    if n > 0
+        for j = 0 to n - 1
+            hj = hs.get(j)
+            lj = ls.get(j)
+            if not (na(hj) or na(lj))
+                lo := na(lo) ? lj : math.min(lo, lj)
+                hi := na(hi) ? hj : math.max(hi, hj)
+    float stepPx = not na(lo) and not na(hi) and hi > lo ? (hi - lo) / nb : na
+    if not na(stepPx)
+        for j = 0 to n - 1
+            oj = os.get(j)
+            hj = hs.get(j)
+            lj = ls.get(j)
+            cj = cs.get(j)
+            vj = vs.get(j)
+            if not (na(oj) or na(hj) or na(lj) or na(cj) or na(vj)) and vj > 0
+                dayVol += vj
+                rj = hj - lj
+                bs = rj > 0 ? (cj - lj) / rj : (cj >= oj ? 1.0 : 0.0)
+                k0 = math.min(nb - 1, math.floor((lj - lo) / stepPx))
+                k1 = math.min(nb - 1, math.floor((hj - lo) / stepPx))
+                for k = k0 to k1
+                    e0   = lo + k * stepPx
+                    frac = rj > 0 ? math.max(0.0, math.min(hj, e0 + stepPx) - math.max(lj, e0)) / rj : 1.0
+                    bv.set(k, bv.get(k) + vj * frac)
+                    bb.set(k, bb.get(k) + vj * frac * bs)
+        float best = -1.0
+        for k = 0 to nb - 1
+            if bv.get(k) > best
+                best := bv.get(k)
+                poc  := k
+    [dayVol > 0 and poc >= 0, lo, stepPx, bv, bb, poc, dayVol]
+
+// Contiguous high-volume bins, merged. Returns parallel arrays [low, high, volume, bought].
+profileClusters(array<float> bv, array<float> bb, float lo, float stepPx, int poc, float thrPct) =>
+    array<float> zl = array.new<float>()
+    array<float> zh = array.new<float>()
+    array<float> zv = array.new<float>()
+    array<float> zb = array.new<float>()
+    if poc >= 0 and bv.size() > 0
+        thr   = thrPct / 100.0 * bv.get(poc)
+        inRun = false
+        for k = 0 to bv.size() - 1
+            v = bv.get(k)
+            if v > 0 and v >= thr
+                if inRun
+                    zh.set(zh.size() - 1, lo + (k + 1) * stepPx)
+                    zv.set(zv.size() - 1, zv.last() + v)
+                    zb.set(zb.size() - 1, zb.last() + bb.get(k))
+                else
+                    zl.push(lo + k * stepPx)
+                    zh.push(lo + (k + 1) * stepPx)
+                    zv.push(v)
+                    zb.push(bb.get(k))
+                inRun := true
+            else
+                inRun := false
+    [zl, zh, zv, zb]
+
+spans(float a0, float a1, float b0, float b1) =>
+    a0 <= b1 and b0 <= a1
+
+clusterInWick(array<float> zl, array<float> zh, float w0, float w1) =>
+    bool hit = false
+    if zl.size() > 0
+        for k = 0 to zl.size() - 1
+            if spans(zl.get(k), zh.get(k), w0, w1)
+                hit := true
+    hit
+
+[vpOk, vpLo, vpStep, vpVol, vpBuy, vpPoc, vpDayVol] = profileBuild(ibOpen, ibHigh, ibLow, ibClose, ibVol, useVP ? ibCount : 0, vpBins)
+[vpZl, vpZh, vpZv, vpZb] = profileClusters(vpVol, vpBuy, vpLo, vpStep, vpOk ? vpPoc : -1, vpHvnPct)
+
+vpPocI     = vpOk ? vpPoc : 0
+vpPocPx    = vpOk ? vpLo + (vpPocI + 0.5) * vpStep : na
+vpPocShare = vpOk ? vpVol.get(vpPocI) / vpDayVol * 100.0 : na
+vpPocBuy   = vpOk and vpVol.get(vpPocI) > 0 ? vpBuy.get(vpPocI) / vpVol.get(vpPocI) * 100.0 : na
+vpNz       = vpZl.size()
+
+// The rejection wick of each side: below the body for a long, above it for a short.
+wickLoL = low
+wickHiL = math.min(open, close)
+wickLoS = math.max(open, close)
+wickHiS = high
+
+vpPocInL  = vpOk and vpPocPx >= wickLoL and vpPocPx <= wickHiL
+vpPocInS  = vpOk and vpPocPx >= wickLoS and vpPocPx <= wickHiS
+vpBeyondL = vpPocInL and not na(lvlLongPx) and vpPocPx < lvlLongPx
+vpBeyondS = vpPocInS and not na(lvlShortPx) and vpPocPx > lvlShortPx
+vpHitL    = vpOk and clusterInWick(vpZl, vpZh, wickLoL, wickHiL)
+vpHitS    = vpOk and clusterInWick(vpZl, vpZh, wickLoS, wickHiS)
+
+// 3 high confluence · 2 POC inside the wick · 1 a cluster inside the wick · 0 nothing · -1 no profile
+vpTierL = not vpOk ? -1 : vpBeyondL ? 3 : vpPocInL ? 2 : vpHitL ? 1 : 0
+vpTierS = not vpOk ? -1 : vpBeyondS ? 3 : vpPocInS ? 2 : vpHitS ? 1 : 0
+
+// Yesterday's value: the previous session's POC and clusters, stored at its close.
+var array<float> pvZl  = array.new<float>()
+var array<float> pvZh  = array.new<float>()
+var float        pvPoc = na
+vpPrevL = (not na(pvPoc) and pvPoc >= wickLoL and pvPoc <= wickHiL) or clusterInWick(pvZl, pvZh, wickLoL, wickHiL)
+vpPrevS = (not na(pvPoc) and pvPoc >= wickLoS and pvPoc <= wickHiS) or clusterInWick(pvZl, pvZh, wickLoS, wickHiS)
+
+vpReq     = useVP and vpRequire != "Off · tag only"
+vpNeed    = vpRequire == "High confluence" ? 3 : 2
+vpMissOk  = not vpOk and proofMiss == "Pass without the proof"
+vpLongOk  = not vpReq or vpTierL >= vpNeed or vpMissOk
+vpShortOk = not vpReq or vpTierS >= vpNeed or vpMissOk
+
+tierName(int t) =>
+    t == 3 ? "★ high confluence" : t == 2 ? "POC inside the wick" : t == 1 ? "cluster inside the wick" : t == 0 ? "no cluster in the wick" : "no profile"
+
+tierShort(int t) =>
+    t == 3 ? "★ high" : t == 2 ? "POC in wick" : t == 1 ? "cluster in wick" : t == 0 ? "no cluster" : "n/a"
+
+binColor(float buyPct) =>
+    buyPct >= 55.0 ? colLong : buyPct <= 45.0 ? colShort : colIdle
+
+// ---------------------------------------------------------------------
+// Verdict
+// ---------------------------------------------------------------------
+
+ready     = isDaily and bar_index >= math.max(sweepLen, rvolLen) and nMonths >= 1 and not na(atr) and rng > 0
+allLong   = ready and regimeLong and levelLong and sweptLow and wickLong and volOk and proofLongOk and vpLongOk
+allShort  = ready and regimeShort and levelShort and sweptHigh and wickShort and volOk and proofShortOk and vpShortOk
+// A candle that traps both ways at once says nothing about direction.
+twoWay    = allLong and allShort
+wantLong  = sideMode != "Short only"
+wantShort = sideMode != "Long only"
+
+activeLong  = (useVol ? 4 : 3) + (useProof ? 1 : 0) + (vpReq ? 1 : 0)
+activeShort = (useVol ? 4 : 3) + (useProof and proofShort ? 1 : 0) + (vpReq ? 1 : 0)
+openLong    = (levelLong ? 1 : 0) + (sweptLow ? 1 : 0) + (wickLong ? 1 : 0) + (useVol and volPass ? 1 : 0) + (useProof and proofLongOk ? 1 : 0) + (vpReq and vpLongOk ? 1 : 0)
+openShort   = (levelShort ? 1 : 0) + (sweptHigh ? 1 : 0) + (wickShort ? 1 : 0) + (useVol and volPass ? 1 : 0) + (useProof and proofShort and proofShortOk ? 1 : 0) + (vpReq and vpShortOk ? 1 : 0)
+
+levelTxtLong  = supPM ? "prev month low " + str.tostring(pmLow, format.mintick) : demandHit ? "monthly demand " + str.tostring(demHitBot, format.mintick) + "-" + str.tostring(demHitTop, format.mintick) : supMO ? "month open " + str.tostring(curOpen, format.mintick) : supPQ ? "prev quarter low " + str.tostring(pqLow, format.mintick) : supPY ? "prev year low " + str.tostring(pyLow, format.mintick) : ""
+levelTxtShort = resPM ? "prev month high " + str.tostring(pmHigh, format.mintick) : supplyHit ? "monthly supply " + str.tostring(supHitBot, format.mintick) + "-" + str.tostring(supHitTop, format.mintick) : resMO ? "month open " + str.tostring(curOpen, format.mintick) : resPQ ? "prev quarter high " + str.tostring(pqHigh, format.mintick) : resPY ? "prev year high " + str.tostring(pyHigh, format.mintick) : ""
+stackTxtLong  = stackLong ? (onPYL ? " · stacked on the prev year low" : " · stacked on the prev quarter low") : ""
+stackTxtShort = stackShort ? (onPYH ? " · stacked on the prev year high" : " · stacked on the prev quarter high") : ""
+volTxt        = useVol and volMeasured ? " · RVOL " + str.tostring(rvol, "#") + "%" : ""
+proofTxtLong  = useProof ? (prMeasL ? " · proof " + str.tostring(prBeyondL, "#") + "% beyond / " + str.tostring(prAfterL, "#") + "% after" : " · proof n/a") : ""
+proofTxtShort = useProof and proofShort ? (prMeasS ? " · proof " + str.tostring(prBeyondS, "#") + "% beyond / " + str.tostring(prAfterS, "#") + "% after" : " · proof n/a") : ""
+regimeTxt     = useRegime ? (refOk ? " · " + refName + " " + str.tostring(refDist, "#.#") + "% vs " + (refRising ? "rising " : "falling ") + str.tostring(regimeLen) + "d" : " · regime n/a") : ""
+pocTxt        = vpOk ? " (POC " + str.tostring(vpPocPx, format.mintick) + ", " + str.tostring(vpPocShare, "#") + "% of the day)" : ""
+vpTxtLong     = useVP ? " · profile: " + tierName(vpTierL) + pocTxt + (vpOk and vpPrevL ? " · caution: wick inside yesterday's value" : "") : ""
+vpTxtShort    = useVP ? " · profile: " + tierName(vpTierS) + pocTxt + (vpOk and vpPrevS ? " · caution: wick inside yesterday's value" : "") : ""
+whyLong       = levelTxtLong + stackTxtLong + " · swept the " + str.tostring(sweepLen) + "-day low · lower wick " + str.tostring(dnWickPct, "#") + "%" + volTxt + proofTxtLong + vpTxtLong + regimeTxt
+whyShort      = levelTxtShort + stackTxtShort + " · swept the " + str.tostring(sweepLen) + "-day high · upper wick " + str.tostring(upWickPct, "#") + "%" + volTxt + proofTxtShort + vpTxtShort + regimeTxt
+
+// ---------------------------------------------------------------------
+// Dashboard universe
+// ---------------------------------------------------------------------
+
+isBtc   = syminfo.basecurrency == "BTC" or str.startswith(syminfo.ticker, "BTCUSD")
+inBand  = isBtc or (close > bandMin and close < bandMax)
+bandTxt = isBtc ? "Bitcoin · always tracked" : inBand ? "inside · tracked" : "outside · not tracked"
+
+// ---------------------------------------------------------------------
+// Setups, confirmation and signals — decided on the daily close only
+// ---------------------------------------------------------------------
+
+var int    lastLongSetup  = na
+var int    lastShortSetup = na
+var int    pendLongBar    = na
+var float  pendLongHigh   = na
+var float  pendLongLow    = na
+var float  pendLongAtr    = na
+var string pendLongWhy    = ""
+var int    pendShortBar   = na
+var float  pendShortHigh  = na
+var float  pendShortLow   = na
+var float  pendShortAtr   = na
+var string pendShortWhy   = ""
+var int    pendLongTier   = na
+var int    pendShortTier  = na
+
+closed     = barstate.isconfirmed
+longSetup  = closed and wantLong and allLong and not twoWay and (na(lastLongSetup) or bar_index - lastLongSetup >= cooldown)
+shortSetup = closed and wantShort and allShort and not twoWay and (na(lastShortSetup) or bar_index - lastShortSetup >= cooldown)
+
+bool   longSignal  = false
+bool   shortSignal = false
+float  longStop    = na
+float  shortStop   = na
+string longWhy     = ""
+string shortWhy    = ""
+int    longTier    = -1
+int    shortTier   = -1
+
+if closed
+    if longSetup
+        lastLongSetup := bar_index
+    if shortSetup
+        lastShortSetup := bar_index
+
+    if longSetup and not confLong
+        longSignal := true
+        longStop   := low - stopBuf * atr
+        longWhy    := whyLong
+        longTier   := vpTierL
+    if confLong and not na(pendLongBar) and pendLongBar == bar_index - 1 and close > pendLongHigh
+        longSignal := true
+        longStop   := math.min(pendLongLow, low) - stopBuf * pendLongAtr
+        longWhy    := pendLongWhy
+        longTier   := pendLongTier
+
+    if shortSetup and not confShort
+        shortSignal := true
+        shortStop   := high + stopBuf * atr
+        shortWhy    := whyShort
+        shortTier   := vpTierS
+    if confShort and not na(pendShortBar) and pendShortBar == bar_index - 1 and close < pendShortLow
+        shortSignal := true
+        shortStop   := math.max(pendShortHigh, high) + stopBuf * pendShortAtr
+        shortWhy    := pendShortWhy
+        shortTier   := pendShortTier
+
+    // A stop on the wrong side of the entry is no trade.
+    if longSignal and not (close - longStop > 0)
+        longSignal := false
+    if shortSignal and not (shortStop - close > 0)
+        shortSignal := false
+
+    // Only the candle right after a trap can confirm it.
+    pendLongBar   := longSetup ? bar_index : na
+    pendLongHigh  := longSetup ? high : na
+    pendLongLow   := longSetup ? low : na
+    pendLongAtr   := longSetup ? atr : na
+    pendLongWhy   := longSetup ? whyLong : ""
+    pendLongTier  := longSetup ? vpTierL : na
+    pendShortBar  := shortSetup ? bar_index : na
+    pendShortHigh := shortSetup ? high : na
+    pendShortLow  := shortSetup ? low : na
+    pendShortAtr  := shortSetup ? atr : na
+    pendShortWhy  := shortSetup ? whyShort : ""
+    pendShortTier := shortSetup ? vpTierS : na
+
+longTarget  = longSignal ? close + targetR * (close - longStop) : na
+shortTarget = shortSignal ? close - targetR * (shortStop - close) : na
+
+// ---------------------------------------------------------------------
+// Chart record
+//
+// Each signal becomes a trade: entry at the signal close, the stop and the
+// target above, closed at whichever is hit first, or after `holdBars` days.
+// When one candle spans both, the stop is counted first.
+// ---------------------------------------------------------------------
+
+var array<Trade> trades = array.new<Trade>()
+var Record recLong  = Record.new()
+var Record recShort = Record.new()
+
+newTrade(int side, float entry, float stop) =>
+    risk   = math.abs(entry - stop)
+    target = side == 1 ? entry + targetR * risk : entry - targetR * risk
+    line sl = na
+    line tl = na
+    if showTrades
+        sl := line.new(bar_index, stop, bar_index + holdBars, stop, color = color.new(colShort, 25), style = line.style_dashed)
+        tl := line.new(bar_index, target, bar_index + holdBars, target, color = color.new(colLong, 25), style = line.style_dotted)
+    Trade.new(side, bar_index, entry, stop, target, risk, sl, tl)
+
+if isDaily and closed and trades.size() > 0
+    for i = trades.size() - 1 to 0
+        t = trades.get(i)
+        float r      = na
+        float exitPx = na
+        if t.side == 1
+            if low <= t.stop
+                r      := -1.0
+                exitPx := t.stop
+            else if high >= t.target
+                r      := (t.target - t.entry) / t.risk
+                exitPx := t.target
+            else if bar_index - t.entryBar >= holdBars
+                r      := (close - t.entry) / t.risk
+                exitPx := close
+        else
+            if high >= t.stop
+                r      := -1.0
+                exitPx := t.stop
+            else if low <= t.target
+                r      := (t.entry - t.target) / t.risk
+                exitPx := t.target
+            else if bar_index - t.entryBar >= holdBars
+                r      := (t.entry - close) / t.risk
+                exitPx := close
+        if not na(r)
+            rec = t.side == 1 ? recLong : recShort
+            rec.n    += 1
+            rec.wins += r > 0 ? 1 : 0
+            rec.sumR += r
+            if showTrades
+                t.stopLn.set_x2(bar_index)
+                t.targetLn.set_x2(bar_index)
+                label.new(bar_index, exitPx, (r > 0 ? "+" : "") + str.tostring(r, "#.##") + "R", style = label.style_label_left, color = color.new(r > 0 ? colLong : colShort, 20), textcolor = color.white, size = size.tiny)
+            trades.remove(i)
+
+if longSignal
+    trades.push(newTrade(1, close, longStop))
+if shortSignal
+    trades.push(newTrade(-1, close, shortStop))
+
+// ---------------------------------------------------------------------
+// The cluster that caught a trap wick stays on the chart for the holding
+// period: the demand or supply the trade stands on.
+// ---------------------------------------------------------------------
+
+keepCluster(int side, float w0, float w1) =>
+    c = side == 1 ? colLong : colShort
+    if vpZl.size() > 0
+        for k = 0 to vpZl.size() - 1
+            if spans(vpZl.get(k), vpZh.get(k), w0, w1)
+                box.new(bar_index, vpZh.get(k), bar_index + holdBars, vpZl.get(k), border_color = color.new(c, 60), bgcolor = color.new(c, 84), text = "wick cluster · " + str.tostring(vpZv.get(k) / vpDayVol * 100.0, "#") + "% of the day", text_size = size.tiny, text_color = color.new(c, 20), text_halign = text.align_right, text_valign = side == 1 ? text.align_bottom : text.align_top)
+    if (side == 1 and vpPocInL) or (side == -1 and vpPocInS)
+        line.new(bar_index, vpPocPx, bar_index + holdBars, vpPocPx, color = color.new(colPoc, 20), width = 1, style = line.style_dotted)
+
+if useVP and vpShow and vpKeepTrap and vpOk and closed
+    if longSetup
+        keepCluster(1, wickLoL, wickHiL)
+    if shortSetup
+        keepCluster(-1, wickLoS, wickHiS)
+
+// ---------------------------------------------------------------------
+// Zones closed through on this candle stop being levels
+// ---------------------------------------------------------------------
+
+if closed
+    if supplyZones.size() > 0
+        for i = supplyZones.size() - 1 to 0
+            if close > supplyZones.get(i).top
+                retire(supplyZones.remove(i), true)
+    if demandZones.size() > 0
+        for i = demandZones.size() - 1 to 0
+            if close < demandZones.get(i).bot
+                retire(demandZones.remove(i), true)
+
+// ---------------------------------------------------------------------
+// Plots
+// ---------------------------------------------------------------------
+
+// Step lines, so each level is drawn on every day it is live, including the
+// first day of the period.
+plot(isDaily and showPM and usePM ? pmHigh : na, "Previous month high", color = color.new(colShort, 35), linewidth = 1, style = plot.style_stepline)
+plot(isDaily and showPM and usePM ? pmLow : na, "Previous month low", color = color.new(colLong, 35), linewidth = 1, style = plot.style_stepline)
+plot(isDaily and showPM and useMO ? curOpen : na, "Month open", color = color.new(colIdle, 20), linewidth = 1, style = plot.style_stepline)
+plot(isDaily and showQY ? pqHigh : na, "Previous quarter high", color = color.new(colShort, 70), linewidth = 1, style = plot.style_stepline)
+plot(isDaily and showQY ? pqLow : na, "Previous quarter low", color = color.new(colLong, 70), linewidth = 1, style = plot.style_stepline)
+plot(isDaily and showQY ? pyHigh : na, "Previous year high", color = color.new(colShort, 55), linewidth = 2, style = plot.style_stepline)
+plot(isDaily and showQY ? pyLow : na, "Previous year low", color = color.new(colLong, 55), linewidth = 2, style = plot.style_stepline)
+
+longHigh  = longSignal and longTier == 3
+shortHigh = shortSignal and shortTier == 3
+plotshape(longSignal and not longHigh, "LONG — monthly trap", shape.labelup, location.belowbar, color = colLong, text = "LONG", textcolor = color.white, size = size.small)
+plotshape(longHigh, "LONG — high confluence", shape.labelup, location.belowbar, color = colLong, text = "LONG ★", textcolor = color.white, size = size.small)
+plotshape(shortSignal and not shortHigh, "SHORT — monthly trap", shape.labeldown, location.abovebar, color = colShort, text = "SHORT", textcolor = color.white, size = size.small)
+plotshape(shortHigh, "SHORT — high confluence", shape.labeldown, location.abovebar, color = colShort, text = "SHORT ★", textcolor = color.white, size = size.small)
+
+// Every gate passed, waiting on the next close.
+plotshape(longSetup and confLong, "Long trap, awaiting confirmation", shape.diamond, location.belowbar, color = color.new(colLong, 25), size = size.tiny)
+plotshape(shortSetup and confShort, "Short trap, awaiting confirmation", shape.diamond, location.abovebar, color = color.new(colShort, 25), size = size.tiny)
+
+// One gate short, in the right regime: not a trade, but worth a glance.
+anyMark   = longSetup or shortSetup or longSignal or shortSignal
+nearLong  = showNear and ready and closed and wantLong and regimeLong and openLong == activeLong - 1 and not anyMark
+nearShort = showNear and ready and closed and wantShort and regimeShort and openShort == activeShort - 1 and not anyMark
+plotshape(nearLong, "Long · one gate short", shape.triangleup, location.belowbar, color = color.new(colLong, 55), size = size.tiny)
+plotshape(nearShort, "Short · one gate short", shape.triangledown, location.abovebar, color = color.new(colShort, 55), size = size.tiny)
+
+barcolor(longSignal ? colLong : shortSignal ? colShort : na, title = "Signal candle")
+
+// ---------------------------------------------------------------------
+// Profile drawings for the last candle: the histogram to its right, the
+// clusters as bands over it, the POC, and yesterday's POC. Redrawn on
+// every update of the last candle, never on history.
+// ---------------------------------------------------------------------
+
+var array<box>   vpHistBoxes = array.new<box>()
+var array<box>   vpBandBoxes = array.new<box>()
+var array<line>  vpLines     = array.new<line>()
+var array<label> vpLabels    = array.new<label>()
+
+if useVP and vpShow and isDaily and barstate.islast
+    if vpHistBoxes.size() > 0
+        for bx in vpHistBoxes
+            bx.delete()
+        vpHistBoxes.clear()
+    if vpBandBoxes.size() > 0
+        for bx in vpBandBoxes
+            bx.delete()
+        vpBandBoxes.clear()
+    if vpLines.size() > 0
+        for ln in vpLines
+            ln.delete()
+        vpLines.clear()
+    if vpLabels.size() > 0
+        for lb in vpLabels
+            lb.delete()
+        vpLabels.clear()
+
+    if vpOk
+        maxV = vpVol.get(vpPocI)
+        thr  = vpHvnPct / 100.0 * maxV
+        x0   = bar_index + 2
+        xEnd = x0 + vpWidth
+        if vpShowHist
+            for k = 0 to vpBins - 1
+                v = vpVol.get(k)
+                if v > 0
+                    w     = math.max(1, math.round(v / maxV * vpWidth))
+                    isPoc = k == vpPocI
+                    isHvn = v >= thr
+                    c     = isPoc ? colPoc : binColor(vpBuy.get(k) / v * 100.0)
+                    vpHistBoxes.push(box.new(x0, vpLo + (k + 1) * vpStep, x0 + w, vpLo + k * vpStep, border_color = color.new(c, isHvn ? 45 : 80), bgcolor = color.new(c, isPoc ? 30 : isHvn ? 62 : 88)))
+        if vpShowBand and vpZl.size() > 0
+            for k = 0 to vpZl.size() - 1
+                zv  = vpZv.get(k)
+                buy = zv > 0 ? vpZb.get(k) / zv * 100.0 : 50.0
+                c   = binColor(buy)
+                tag = (buy >= 55.0 ? "buy cluster · " : buy <= 45.0 ? "sell cluster · " : "cluster · ") + str.tostring(zv / vpDayVol * 100.0, "#") + "% of the day · " + str.tostring(buy, "#") + "% bought"
+                vpBandBoxes.push(box.new(bar_index, vpZh.get(k), xEnd, vpZl.get(k), border_color = color.new(c, 65), bgcolor = color.new(c, 86), text = tag, text_size = size.tiny, text_color = color.new(c, 15), text_halign = text.align_left, text_valign = text.align_center))
+        vpLines.push(line.new(bar_index, vpPocPx, xEnd, vpPocPx, color = color.new(colPoc, 10), width = 2))
+        vpLabels.push(label.new(xEnd, vpPocPx, "POC " + str.tostring(vpPocPx, format.mintick) + " · " + str.tostring(vpPocShare, "#") + "% of the day · " + str.tostring(vpPocBuy, "#") + "% bought", style = label.style_label_left, color = color.new(colPoc, 15), textcolor = color.white, size = size.tiny))
+    if vpShowPrev and not na(pvPoc)
+        vpLines.push(line.new(bar_index - 1, pvPoc, bar_index + 1, pvPoc, color = color.new(colIdle, 20), width = 1, style = line.style_dotted))
+        vpLabels.push(label.new(bar_index - 1, pvPoc, "yesterday POC", style = label.style_label_right, color = color.new(colIdle, 40), textcolor = color.white, size = size.tiny))
+
+// ---------------------------------------------------------------------
+// Gate panel
+// ---------------------------------------------------------------------
+
+posOf(string s) =>
+    switch s
+        "Top left"     => position.top_left
+        "Bottom right" => position.bottom_right
+        "Bottom left"  => position.bottom_left
+        =>                position.top_right
+
+pctTxt(float v) =>
+    (v > 0 ? "+" : "") + str.tostring(v, "#.0") + "%"
+
+recTxt(Record r) =>
+    r.n == 0 ? "no trades yet" : str.tostring(r.n) + " · " + str.tostring(r.wins * 100.0 / r.n, "#") + "% · " + (r.sumR >= 0 ? "+" : "") + str.tostring(r.sumR / r.n, "#.00") + "R"
+
+proofCell(bool on, bool hasLevel, bool meas, float bey, float aft) =>
+    not on ? "off" : meas ? str.tostring(bey, "#") + "% · " + str.tostring(aft, "#") + "%" : hasLevel ? (ibCount < 2 ? "no intrabars" : "n/a") : "—"
+
+lastOpen(int side) =>
+    Trade found = na
+    for t in trades
+        if t.side == side
+            found := t
+    found
+
+var table panel = table.new(posOf(panelPos), 3, 15, bgcolor = color.new(#0b0e13, 8), border_color = color.new(#3a4150, 45), border_width = 1, frame_color = color.new(#3a4150, 25), frame_width = 1)
+
+if showPanel and barstate.islast
+    table.clear(panel, 0, 0, 2, 14)
+    headBg = color.new(#1a2029, 10)
+    table.cell(panel, 0, 0, "NOVA MONTHLY TRAP", text_color = color.white, bgcolor = headBg, text_size = size.small, text_halign = text.align_left, tooltip = "v1.2 · regime · wick proof · intraday profile")
+
+    if not isDaily
+        table.cell(panel, 1, 0, "", bgcolor = headBg, text_size = size.small)
+        table.cell(panel, 2, 0, "", bgcolor = headBg, text_size = size.small)
+        table.cell(panel, 0, 1, "Switch to the 1D chart", text_color = colShort, text_size = size.tiny, text_halign = text.align_left, tooltip = "Levels, gates, the regime, the proof and the testing notes are all built on daily candles.")
+        table.cell(panel, 1, 1, "", text_size = size.tiny)
+        table.cell(panel, 2, 1, "", text_size = size.tiny)
+    else
+        headL = wantLong and allLong ? colLong : colIdle
+        headS = wantShort and allShort ? colShort : colIdle
+        table.cell(panel, 1, 0, wantLong ? "Long" : "Long off", text_color = color.white, bgcolor = color.new(headL, 25), text_size = size.small, tooltip = "Turns green while every gate is open on the current candle. A signal still waits for the daily close.")
+        table.cell(panel, 2, 0, wantShort ? "Short" : "Short off", text_color = color.white, bgcolor = color.new(headS, 25), text_size = size.small, tooltip = "Turns red while every gate is open on the current candle. A signal still waits for the daily close.")
+
+        // 0 · Regime
+        regState = not useRegime ? "off" : refOk ? refName + " " + pctTxt(refDist) + " vs " + (refRising ? "rising" : "falling") + " " + str.tostring(regimeLen) + "d" : refName + " unavailable"
+        table.cell(panel, 0, 1, "0 · Regime · " + regState, text_color = color.gray, text_size = size.tiny, text_halign = text.align_left, tooltip = "The reference market against its " + str.tostring(regimeLen) + "-day average. Longs need: " + str.lower(longRegime) + ". Shorts need: " + str.lower(shortRegime) + ".")
+        table.cell(panel, 1, 1, not useRegime ? "—" : regimeLong ? "open" : "closed", text_color = useRegime and regimeLong ? colLong : colIdle, text_size = size.tiny)
+        table.cell(panel, 2, 1, not useRegime ? "—" : regimeShort ? "open" : "closed", text_color = useRegime and regimeShort ? colShort : colIdle, text_size = size.tiny)
+
+        // Nearest support at or below the close, nearest resistance at or above it.
+        float  supLvl = na
+        string supTxt = "none"
+        if usePM and not na(pmLow) and pmLow < close
+            supLvl := pmLow
+            supTxt := "PM low"
+        // A live candle already below a zone is breaking it, not sitting in it.
+        for z in demandZones
+            if close >= z.bot
+                lvl = math.min(z.top, close)
+                if na(supLvl) or lvl > supLvl
+                    supLvl := lvl
+                    supTxt := lvl >= close ? "in demand" : "demand"
+        if useMO and not na(curOpen) and curOpen < close and (na(supLvl) or curOpen > supLvl)
+            supLvl := curOpen
+            supTxt := "month open"
+        if useQY and not na(pqLow) and pqLow < close and (na(supLvl) or pqLow > supLvl)
+            supLvl := pqLow
+            supTxt := "PQ low"
+        if useQY and not na(pyLow) and pyLow < close and (na(supLvl) or pyLow > supLvl)
+            supLvl := pyLow
+            supTxt := "PY low"
+        float  resLvl = na
+        string resTxt = "none"
+        if usePM and not na(pmHigh) and pmHigh > close
+            resLvl := pmHigh
+            resTxt := "PM high"
+        for z in supplyZones
+            if close <= z.top
+                lvl = math.max(z.bot, close)
+                if na(resLvl) or lvl < resLvl
+                    resLvl := lvl
+                    resTxt := lvl <= close ? "in supply" : "supply"
+        if useMO and not na(curOpen) and curOpen > close and (na(resLvl) or curOpen < resLvl)
+            resLvl := curOpen
+            resTxt := "month open"
+        if useQY and not na(pqHigh) and pqHigh > close and (na(resLvl) or pqHigh < resLvl)
+            resLvl := pqHigh
+            resTxt := "PQ high"
+        if useQY and not na(pyHigh) and pyHigh > close and (na(resLvl) or pyHigh < resLvl)
+            resLvl := pyHigh
+            resTxt := "PY high"
+
+        lvlL = levelLong ? (supPM ? "PM low" : demandHit ? "demand" : supMO ? "month open" : supPQ ? "PQ low" : "PY low") + (stackLong ? (onPYL ? " +PY" : " +PQ") : "") : na(supLvl) ? "none" : pctTxt((supLvl - close) / close * 100.0) + " " + supTxt
+        lvlS = levelShort ? (resPM ? "PM high" : supplyHit ? "supply" : resMO ? "month open" : resPQ ? "PQ high" : "PY high") + (stackShort ? (onPYH ? " +PY" : " +PQ") : "") : na(resLvl) ? "none" : pctTxt((resLvl - close) / close * 100.0) + " " + resTxt
+        table.cell(panel, 0, 2, "1 · Monthly level", text_color = color.gray, text_size = size.tiny, text_halign = text.align_left, tooltip = "Reached within " + str.tostring(tolAtr) + " ATR and closed back on the trapped side. When not reached: distance from the close to the nearest level. +PQ / +PY: the trap also sits on the previous quarter or year level (stacked).")
+        table.cell(panel, 1, 2, lvlL, text_color = levelLong ? colLong : colIdle, text_size = size.tiny)
+        table.cell(panel, 2, 2, lvlS, text_color = levelShort ? colShort : colIdle, text_size = size.tiny)
+
+        table.cell(panel, 0, 3, "2 · " + str.tostring(sweepLen) + "-day sweep", text_color = color.gray, text_size = size.tiny, text_halign = text.align_left)
+        table.cell(panel, 1, 3, sweptLow ? "new low" : "—", text_color = sweptLow ? colLong : colIdle, text_size = size.tiny)
+        table.cell(panel, 2, 3, sweptHigh ? "new high" : "—", text_color = sweptHigh ? colShort : colIdle, text_size = size.tiny)
+
+        table.cell(panel, 0, 4, "3 · Rejection wick", text_color = color.gray, text_size = size.tiny, text_halign = text.align_left, tooltip = "Needs " + str.tostring(wickMin, "#") + "% of the candle's range.")
+        table.cell(panel, 1, 4, str.tostring(dnWickPct, "#") + "%", text_color = wickLong ? colLong : colIdle, text_size = size.tiny)
+        table.cell(panel, 2, 4, str.tostring(upWickPct, "#") + "%", text_color = wickShort ? colShort : colIdle, text_size = size.tiny)
+
+        vTxt = not useVol ? "off" : volMeasured ? str.tostring(rvol, "#") + "%" : "n/a"
+        table.cell(panel, 0, 5, "4 · Volume climax", text_color = color.gray, text_size = size.tiny, text_halign = text.align_left, tooltip = "Needs " + str.tostring(rvolMin, "#") + "% of the " + str.tostring(rvolLen) + "-day average.")
+        table.cell(panel, 1, 5, vTxt, text_color = useVol and volPass ? colLong : colIdle, text_size = size.tiny)
+        table.cell(panel, 2, 5, vTxt, text_color = useVol and volPass ? colShort : colIdle, text_size = size.tiny)
+
+        sinceTxt = na(proofSince) ? "No intrabars on this chart yet." : "Intrabars available since " + str.format_time(proofSince, "MMM yyyy", syminfo.timezone) + "."
+        table.cell(panel, 0, 6, "5 · Wick proof · " + proofTf + "m", text_color = color.gray, text_size = size.tiny, text_halign = text.align_left, tooltip = "Volume beyond the level (needs " + str.tostring(beyondMin, "#") + "% of the day) · volume after the extreme (needs " + str.tostring(afterMin, "#") + "% of the volume before it). " + sinceTxt)
+        table.cell(panel, 1, 6, proofCell(useProof, levelLong, prMeasL, prBeyondL, prAfterL), text_color = useProof and prPassL ? colLong : colIdle, text_size = size.tiny)
+        table.cell(panel, 2, 6, proofCell(useProof and proofShort, levelShort, prMeasS, prBeyondS, prAfterS), text_color = useProof and proofShort and prPassS ? colShort : colIdle, text_size = size.tiny)
+
+        // 6 · Intraday profile
+        vpL = not useVP ? "off" : tierShort(vpTierL) + (vpOk and vpPrevL ? " · caution" : "")
+        vpS = not useVP ? "off" : tierShort(vpTierS) + (vpOk and vpPrevS ? " · caution" : "")
+        table.cell(panel, 0, 7, "6 · Intraday profile" + (vpReq ? " · gate" : ""), text_color = color.gray, text_size = size.tiny, text_halign = text.align_left, tooltip = "Where the day's volume clustered, from the " + proofTf + "m intrabars. ★ high: the POC sits inside the rejection wick and beyond the level (+0.99R on 40 of the 71 tested longs). POC in wick: +0.84R on 17. Cluster in wick: +0.95R on 13. No cluster: the one tested case was stopped. Caution: the wick landed inside yesterday's POC or cluster, which tested poorly on every set.")
+        table.cell(panel, 1, 7, vpL, text_color = useVP and vpTierL >= 2 ? colLong : useVP and vpTierL == 1 ? color.white : colIdle, text_size = size.tiny)
+        table.cell(panel, 2, 7, vpS, text_color = useVP and vpTierS >= 2 ? colShort : useVP and vpTierS == 1 ? color.white : colIdle, text_size = size.tiny)
+
+        pocCell = not useVP ? "" : vpOk ? "POC " + str.tostring(vpPocPx, format.mintick) + " · " + str.tostring(vpPocShare, "#") + "% of the day" : ibCount < 2 ? "No intrabars on this candle" : "Profile n/a"
+        table.cell(panel, 0, 8, pocCell, text_color = color.gray, text_size = size.tiny, text_halign = text.align_left, tooltip = "The point of control and the share of the day's volume that traded in its bin. Clusters: high-volume nodes at or above " + str.tostring(vpHvnPct, "#") + "% of the POC bin, merged where they touch. Bought: the share of the POC bin's volume read as buying, from where each intrabar closed in its range.")
+        table.cell(panel, 1, 8, useVP and vpOk ? str.tostring(vpNz) + (vpNz == 1 ? " cluster" : " clusters") : "", text_color = color.white, text_size = size.tiny)
+        table.cell(panel, 2, 8, useVP and vpOk ? str.tostring(vpPocBuy, "#") + "% bought at POC" : "", text_color = useVP and vpOk ? binColor(vpPocBuy) : colIdle, text_size = size.tiny)
+
+        table.cell(panel, 0, 9, "Gates open", text_color = color.gray, text_size = size.tiny, text_halign = text.align_left, tooltip = "Gates 1 to 5 on the current candle, plus the profile when it is made a gate. The regime is not counted: it is the door, not a gate.")
+        table.cell(panel, 1, 9, str.tostring(openLong) + "/" + str.tostring(activeLong), text_color = openLong == activeLong ? colLong : color.white, text_size = size.tiny)
+        table.cell(panel, 2, 9, str.tostring(openShort) + "/" + str.tostring(activeShort), text_color = openShort == activeShort ? colShort : color.white, text_size = size.tiny)
+
+        openL = lastOpen(1)
+        openS = lastOpen(-1)
+        tradeL = longSignal ? "LONG · stop " + str.tostring(longStop, format.mintick) : confLong and not na(pendLongBar) ? "needs close > " + str.tostring(pendLongHigh, format.mintick) : not na(openL) ? "open · stop " + str.tostring(openL.stop, format.mintick) + " · tgt " + str.tostring(openL.target, format.mintick) : "—"
+        tradeS = shortSignal ? "SHORT · stop " + str.tostring(shortStop, format.mintick) : confShort and not na(pendShortBar) ? "needs close < " + str.tostring(pendShortLow, format.mintick) : not na(openS) ? "open · stop " + str.tostring(openS.stop, format.mintick) + " · tgt " + str.tostring(openS.target, format.mintick) : "—"
+        table.cell(panel, 0, 10, "Trade", text_color = color.gray, text_size = size.tiny, text_halign = text.align_left, tooltip = "A fresh signal, a trap waiting for its confirming close, or the open trade with its stop and target.")
+        table.cell(panel, 1, 10, tradeL, text_color = tradeL == "—" ? colIdle : colLong, text_size = size.tiny)
+        table.cell(panel, 2, 10, tradeS, text_color = tradeS == "—" ? colIdle : colShort, text_size = size.tiny)
+
+        table.cell(panel, 0, 11, "Chart record", text_color = color.gray, text_size = size.tiny, text_halign = text.align_left, tooltip = "Closed trades on this chart with the current settings: count · share closed in profit · average result in R. Stop " + str.tostring(stopBuf) + " ATR beyond the wick, target " + str.tostring(targetR) + "R, max " + str.tostring(holdBars) + " days, no fees.")
+        table.cell(panel, 1, 11, recTxt(recLong), text_color = color.white, text_size = size.tiny)
+        table.cell(panel, 2, 11, recTxt(recShort), text_color = color.white, text_size = size.tiny)
+
+        table.cell(panel, 0, 12, "Live zones", text_color = color.gray, text_size = size.tiny, text_halign = text.align_left)
+        table.cell(panel, 1, 12, str.tostring(demandZones.size()) + " demand", text_color = color.white, text_size = size.tiny)
+        table.cell(panel, 2, 12, str.tostring(supplyZones.size()) + " supply", text_color = color.white, text_size = size.tiny)
+
+        // Dashboard universe
+        if showBand
+            table.cell(panel, 0, 13, "Dashboard band $" + str.tostring(bandMin) + "–$" + str.tostring(bandMax), text_color = color.gray, text_size = size.tiny, text_halign = text.align_left, tooltip = "The Nova dashboard scans Bitcoin plus altcoins priced strictly inside this band. A note, never a gate.")
+            table.cell(panel, 1, 13, bandTxt, text_color = inBand ? color.white : colShort, text_size = size.tiny, text_halign = text.align_left)
+            table.cell(panel, 2, 13, "", text_size = size.tiny)
+        else
+            table.cell(panel, 0, 13, "", text_size = size.tiny)
+            table.cell(panel, 1, 13, "", text_size = size.tiny)
+            table.cell(panel, 2, 13, "", text_size = size.tiny)
+
+        string note   = ""
+        color  noteCl = colIdle
+        if useVol and not volMeasured and bar_index > rvolLen
+            note   := "No volume data on this symbol"
+            noteCl := colShort
+        else if useRegime and not refOk and bar_index > regimeLen + slopeLen
+            note   := "Regime reference unavailable: " + refName
+            noteCl := colShort
+        else if useProof and ibCount == 0
+            note   := "No intrabars on this candle · proof " + (proofMiss == "Skip the signal" ? "skips it" : "passes it")
+            noteCl := colShort
+        else if useZones and nMonths < 2 * pivLen + 1
+            note := "Zones need " + str.tostring(2 * pivLen + 1) + " closed months"
+        else
+            note := barstate.isconfirmed ? "Daily close" : "Live candle · signals at the close"
+        table.cell(panel, 0, 14, note, text_color = noteCl, text_size = size.tiny, text_halign = text.align_left, tooltip = "Turn off 'Require the volume gate' only on symbols that have no volume. A missing regime reference closes both sides; fix the symbol in the settings.")
+        table.cell(panel, 1, 14, "", text_size = size.tiny)
+        table.cell(panel, 2, 14, "", text_size = size.tiny)
+
+// ---------------------------------------------------------------------
+// Alerts
+//
+// alertcondition() adds the classic entries to the alert dialog. alert()
+// also fires a dynamic message with the live numbers, so a webhook gets
+// the level, the regime, the proof, the stop and the target rather than
+// just "condition met".
+// ---------------------------------------------------------------------
+
+alertcondition(longSignal, "Monthly Trap · LONG", "NOVA MTRAP · LONG {{ticker}} at {{close}}")
+alertcondition(shortSignal, "Monthly Trap · SHORT", "NOVA MTRAP · SHORT {{ticker}} at {{close}}")
+alertcondition(longHigh, "Monthly Trap · LONG · high confluence", "NOVA MTRAP · LONG ★ {{ticker}} at {{close}} · POC inside the wick, beyond the level")
+alertcondition(shortHigh, "Monthly Trap · SHORT · high confluence", "NOVA MTRAP · SHORT ★ {{ticker}} at {{close}} · POC inside the wick, beyond the level")
+alertcondition(shortSetup and confShort, "Monthly Trap · short trap, awaiting confirmation", "NOVA MTRAP · short trap on {{ticker}}, needs a daily close below {{low}}")
+alertcondition(longSetup and confLong, "Monthly Trap · long trap, awaiting confirmation", "NOVA MTRAP · long trap on {{ticker}}, needs a daily close above {{high}}")
+
+bandAlert = inBand ? "" : " | outside the dashboard band"
+
+if longSignal
+    alert("LONG · " + syminfo.ticker + " 1D @ " + str.tostring(close, format.mintick) + " | " + longWhy + " | stop " + str.tostring(longStop, format.mintick) + " | target " + str.tostring(longTarget, format.mintick) + " (" + str.tostring(targetR, "#.##") + "R)" + bandAlert, alert.freq_once_per_bar_close)
+if shortSignal
+    alert("SHORT · " + syminfo.ticker + " 1D @ " + str.tostring(close, format.mintick) + " | " + shortWhy + " | stop " + str.tostring(shortStop, format.mintick) + " | target " + str.tostring(shortTarget, format.mintick) + " (" + str.tostring(targetR, "#.##") + "R)" + bandAlert, alert.freq_once_per_bar_close)
+if shortSetup and confShort
+    alert("SHORT TRAP · " + syminfo.ticker + " 1D | " + whyShort + " | needs a daily close below " + str.tostring(low, format.mintick) + bandAlert, alert.freq_once_per_bar_close)
+if longSetup and confLong
+    alert("LONG TRAP · " + syminfo.ticker + " 1D | " + whyLong + " | needs a daily close above " + str.tostring(high, format.mintick) + bandAlert, alert.freq_once_per_bar_close)
+
+// ---------------------------------------------------------------------
+// Today's profile becomes yesterday's value at the daily close. Last, so
+// everything above this line compared the wick with the previous session.
+// ---------------------------------------------------------------------
+
+if isDaily and barstate.isconfirmed
+    pvZl  := vpOk ? vpZl.copy() : array.new<float>()
+    pvZh  := vpOk ? vpZh.copy() : array.new<float>()
+    pvPoc := vpPocPx

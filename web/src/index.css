@@ -1,0 +1,243 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Nova DCA Pro — dark terminal.
+ * Dense, monospaced, numbers-first. Colour carries meaning only:
+ * amber = active control, green = upside, red = downside. Nothing decorative.
+ */
+
+@layer base {
+  :root {
+    --background: 222 20% 6%;
+    --foreground: 210 16% 91%;
+
+    --card: 222 18% 8%;
+    --card-foreground: 210 16% 91%;
+
+    --popover: 222 18% 9%;
+    --popover-foreground: 210 16% 91%;
+
+    /* Amber is the terminal's action colour. */
+    --primary: 36 96% 55%;
+    --primary-foreground: 30 40% 8%;
+
+    --secondary: 222 14% 13%;
+    --secondary-foreground: 210 14% 84%;
+
+    --muted: 222 14% 12%;
+    --muted-foreground: 218 9% 50%;
+
+    --accent: 222 14% 14%;
+    --accent-foreground: 210 16% 91%;
+
+    --destructive: 356 68% 52%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 13% 16%;
+    --input: 220 13% 18%;
+    --ring: 36 96% 55%;
+
+    /* Panel elevations */
+    --surface: 222 18% 8%;
+    --surface-2: 222 16% 10.5%;
+    --line: 220 13% 16%;
+    --line-soft: 220 13% 13%;
+
+    /* Semantics */
+    --pos: 152 56% 47%;
+    --pos-soft: 152 40% 12%;
+    --neg: 356 72% 58%;
+    --neg-soft: 356 45% 13%;
+    --warn: 38 92% 55%;
+    --warn-soft: 38 60% 12%;
+
+    --radius: 0.375rem;
+
+    --sidebar-background: 222 18% 8%;
+    --sidebar-foreground: 210 16% 91%;
+    --sidebar-primary: 36 96% 55%;
+    --sidebar-primary-foreground: 30 40% 8%;
+    --sidebar-accent: 222 14% 13%;
+    --sidebar-accent-foreground: 210 16% 91%;
+    --sidebar-border: 220 13% 16%;
+    --sidebar-ring: 36 96% 55%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "ss01" 1;
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.28);
+    color: hsl(var(--foreground));
+  }
+
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  input[type="number"] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
+
+  ::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: hsl(220 10% 30%);
+    border: 2px solid transparent;
+    background-clip: content-box;
+    border-radius: 999px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(220 10% 42%);
+    background-clip: content-box;
+  }
+}
+
+@layer components {
+  /* Every number in the app is monospaced and tabular so columns lock up. */
+  .num {
+    font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+
+  /* Small uppercase field/column label. */
+  .lbl {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    @apply text-[9.5px] font-medium uppercase tracking-[0.14em] text-muted-foreground;
+  }
+
+  .panel {
+    @apply rounded border border-border bg-card;
+  }
+
+  .panel-head {
+    @apply flex h-8 items-center justify-between gap-3 border-b border-border bg-secondary/40 px-3;
+  }
+
+  /* Terminal input: flat, mono, amber focus. */
+  .field {
+    @apply h-8 w-full rounded-[3px] border border-input bg-background px-2 text-[13px] text-foreground outline-none transition-colors;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+
+  .field:hover {
+    @apply border-muted-foreground/45;
+  }
+
+  .field:focus {
+    @apply border-primary bg-secondary/30;
+  }
+
+  .field::placeholder {
+    @apply text-muted-foreground/45;
+  }
+
+  /* Dense data table shared by the grid and the plans list. */
+  .grid-table {
+    @apply w-full border-collapse text-[12px];
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .grid-table thead th {
+    @apply h-7 whitespace-nowrap border-b border-border bg-secondary/40 px-2.5 text-left text-[9.5px] font-medium uppercase tracking-[0.12em] text-muted-foreground;
+  }
+
+  .grid-table tbody td {
+    @apply h-[26px] whitespace-nowrap border-b border-line-soft px-2.5 text-foreground;
+  }
+
+  .grid-table tbody tr:last-child td {
+    @apply border-b-0;
+  }
+
+  .grid-table tbody tr:hover td {
+    @apply bg-secondary/35;
+  }
+}
+
+@layer utilities {
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Faint scanline wash — reads as a screen, not a page. */
+  .scanlines {
+    background-image: repeating-linear-gradient(
+      180deg,
+      hsl(210 16% 91% / 0.017) 0px,
+      hsl(210 16% 91% / 0.017) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+  }
+
+  .glow-amber {
+    box-shadow: 0 0 0 1px hsl(var(--primary) / 0.35);
+  }
+
+  /*
+   * An armed setup earns exactly one moving element on the page: a light that
+   * sweeps the top of the verdict band. Everything else stays still, so motion
+   * only ever means "all four gates are open right now".
+   */
+  @keyframes exhaustion-sweep {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(100%);
+    }
+  }
+
+  .pulse-rail {
+    overflow: hidden;
+  }
+
+  .pulse-rail::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    animation: exhaustion-sweep 2.6s ease-in-out infinite;
+  }
+
+  /* Every armed setup is a short, so there is one rail colour. */
+  .pulse-rail[data-side="short"]::after {
+    background: linear-gradient(90deg, transparent, hsl(var(--neg)), transparent);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pulse-rail::after {
+      animation: none;
+    }
+  }
+}
