@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Download,
   FileText,
+  Maximize2,
   Pause,
   Pin,
   Play,
@@ -17,7 +18,7 @@ import {
   VolumeX,
   X,
 } from "lucide-react";
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 
 import { BtcTrapPanel } from "@/components/BtcTrapPanel";
 import { Button, Metric, Panel, Tag } from "@/components/kit";
@@ -568,6 +569,7 @@ export default function Wick() {
   } = useRadar();
 
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
+  const [theater, setTheater] = useState<boolean>(false);
   const [query, setQuery] = useState<string>("");
 
   const blocked = status.market === "blocked";
@@ -605,6 +607,21 @@ export default function Wick() {
   );
 
   const onTogglePin = useCallback(() => togglePin(prefs.selected), [togglePin, prefs.selected]);
+
+  /* Theater mode: Escape closes the overlay and the page behind it stops scrolling. */
+  useEffect(() => {
+    if (!theater) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setTheater(false);
+    };
+    window.addEventListener("keydown", onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [theater]);
 
   return (
     <div className="space-y-3">
@@ -708,6 +725,53 @@ export default function Wick() {
       {/* ---------------- settings (modal) ---------------- */}
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
 
+      {/* ---------------- theater (full-viewport alert feed overlay) ---------------- */}
+      {theater ? (
+        <div
+          className="fixed inset-0 z-[70] flex flex-col bg-background"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Alert feed — theater view"
+        >
+          <header className="flex shrink-0 items-center justify-between gap-3 border-b border-line-soft px-3 py-2">
+            <div className="num text-[12px] font-semibold uppercase tracking-[0.14em] text-foreground">
+              Alert feed{unseen > 0 ? ` — ${unseen} new` : ""}
+            </div>
+            <Button tone="ghost" size="sm" onClick={() => setTheater(false)} title="Close theater view">
+              <X className="h-3.5 w-3.5" />
+              Close
+            </Button>
+          </header>
+          <div className="min-h-0 flex-1 overflow-auto">
+            {alerts.length === 0 ? (
+              <div className="flex h-full items-center justify-center px-3 py-8 text-center">
+                <div>
+                  <p className="num text-[11.5px] uppercase tracking-[0.12em] text-muted-foreground">No signals yet</p>
+                  <p className="mx-auto mt-1.5 max-w-[360px] text-[11px] leading-[1.5] text-muted-foreground/70">
+                    A contract has to pin its 24h high, spike and cool its volume, print a rejected higher high, and run
+                    out of upside liquidity — all at once. Signals land here the moment that happens.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <ul>
+                {alerts.map((alert) => (
+                  <AlertRow
+                    key={alert.id}
+                    alert={alert}
+                    onSelect={onSelect}
+                    onDismiss={dismiss}
+                    job={chainById.get(alert.id)}
+                    now={chainNow}
+                    onRescan={chainRescan}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      ) : null}
+
       {/*
        * Focus + feed. Below `xl` everything stacks in one column with the
        * alert feed first, so a signal is the first thing on a phone. At `xl`
@@ -722,6 +786,17 @@ export default function Wick() {
             flush
             aside={
               <div className="flex items-center gap-1.5">
+                <Button
+                  tone="ghost"
+                  size="sm"
+                  onClick={() => setTheater(true)}
+                  className="px-2"
+                  aria-label="Expand alert feed"
+                  aria-haspopup="dialog"
+                  title="Theater view"
+                >
+                  <Maximize2 className="h-3 w-3" />
+                </Button>
                 {unseen > 0 ? (
                   <Button tone="ghost" size="sm" onClick={markAllSeen}>
                     Mark read
