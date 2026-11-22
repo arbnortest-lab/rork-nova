@@ -65,8 +65,7 @@ export const RadarChart = memo(function RadarChart({
   seriesKey: string;
   decimals: number;
   lines: PriceLineSpec[];
-  /** Fixed pixel height, or "fill" to stretch to the parent (full-screen mode). */
-  height?: number | "fill";
+  height?: number;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -202,11 +201,5 @@ export const RadarChart = memo(function RadarChart({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [linesKey]);
 
-  return (
-    <div
-      ref={hostRef}
-      style={height === "fill" ? undefined : { height }}
-      className={height === "fill" ? "min-h-0 w-full flex-1" : "w-full"}
-    />
-  );
+  return <div ref={hostRef} style={{ height }} className="w-full" />;
 });

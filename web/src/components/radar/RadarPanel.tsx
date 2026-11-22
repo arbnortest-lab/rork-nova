@@ -1,6 +1,5 @@
-import { Lock, LockOpen, Maximize2, Radar, X, Zap } from "lucide-react";
-import { memo, useEffect, useMemo, useState } from "react";
-import { createPortal } from "react-dom";
+import { Lock, LockOpen, Radar, Zap } from "lucide-react";
+import { memo, useMemo, useState } from "react";
 
 import { Button, Metric, Segmented, Tag } from "@/components/kit";
 import { fmtClock, fmtCompactUsd, fmtPrice, fmtQty, fmtSignedPct, priceDecimals, timeAgo } from "@/lib/format";
@@ -357,65 +356,6 @@ const EMPTY_TITLE: Record<"off" | "paused" | "waiting", string> = {
   waiting: "Attaching streams",
 };
 
-/** Inline chart block height — candles (320px) plus the level legend row. */
-const CHART_BLOCK_HEIGHT = 343;
-
-/**
- * The chart area: symbol/interval legend, candles + volume, level legend.
- * `fill` stretches it to its container (full-screen mode); inline it renders
- * at a fixed height. One instance exists at a time, so the series is never
- * rebuilt twice for the same data feed.
- */
-const ChartBlock = memo(function ChartBlock({
-  symbol,
-  interval,
-  chart,
-  decimals,
-  lines,
-  fill = false,
-}: {
-  symbol: string;
-  interval: ChartInterval;
-  chart: RadarChartData;
-  decimals: number;
-  lines: PriceLineSpec[];
-  fill?: boolean;
-}) {
-  return (
-    <div className={cn("relative", fill ? "flex min-h-0 flex-1 flex-col" : "border-b border-border")}>
-      <div className="pointer-events-none absolute left-3 top-2 z-10 flex items-center gap-2">
-        <span className="num text-[10.5px] font-semibold uppercase tracking-[0.1em] text-foreground">
-          {symbol} · {interval}
-        </span>
-        <span className="num text-[9.5px] uppercase tracking-[0.1em] text-muted-foreground">
-          {chart.loading ? "loading history" : chart.error ? `history failed: ${chart.error}` : `${chart.bars.length} bars · live`}
-        </span>
-      </div>
-      <RadarChart
-        bars={chart.bars}
-        seriesKey={`${chart.symbol}:${chart.interval}`}
-        decimals={decimals}
-        lines={lines}
-        height={fill ? "fill" : 320}
-      />
-      <div className="num flex flex-wrap items-center gap-x-3 gap-y-1 px-3 pb-2 text-[9.5px] uppercase tracking-[0.08em] text-muted-foreground">
-        <span>
-          <span className="text-neg">— —</span> 24h high
-        </span>
-        <span>
-          <span className="text-neg">···</span> ask wall
-        </span>
-        <span>
-          <span className="text-pos">···</span> bid wall
-        </span>
-        <span>
-          <span className="text-primary">—</span> liquidation cluster
-        </span>
-      </div>
-    </div>
-  );
-});
-
 /**
  * The focused contract's micro-structure: chart, weighted book imbalance,
  * 20-level depth with whale walls, the tape, liquidations and the squeeze
@@ -473,27 +413,8 @@ export const RadarPanel = memo(function RadarPanel({
   const squeezeTone = squeeze?.level === "hot" ? "text-neg" : squeeze?.level === "warm" ? "text-warn" : "text-primary";
   const lastTick = read ? Math.max(read.lastDepthAt ?? 0, read.lastTradeAt ?? 0) : 0;
 
-  // Full-screen chart mode: a fixed overlay replaces the inline chart (never
-  // covers a second instance), Escape exits, body scroll is locked so the
-  // page underneath neither shifts nor scrolls.
-  const [fullscreen, setFullscreen] = useState(false);
-  useEffect(() => {
-    if (!fullscreen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setFullscreen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      document.body.style.overflow = prevOverflow;
-    };
-  }, [fullscreen]);
-
   return (
-    <>
-      <section className={cn("panel overflow-hidden", read?.state === "signal" && "shadow-[0_0_0_1px_hsl(var(--neg)/0.5)]")}>
+    <section className={cn("panel overflow-hidden", read?.state === "signal" && "shadow-[0_0_0_1px_hsl(var(--neg)/0.5)]")}>
       {/* header */}
       <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border bg-secondary/40 px-3 py-2">
         <div className="flex items-center gap-2">
@@ -516,15 +437,6 @@ export const RadarPanel = memo(function RadarPanel({
             onChange={onInterval}
             className="h-7 w-[150px]"
           />
-          <Button
-            tone="ghost"
-            size="sm"
-            onClick={() => setFullscreen(true)}
-            aria-label="Full-screen chart"
-            title="Full-screen chart with the live event table beside it"
-          >
-            <Maximize2 className="h-[12px] w-[12px]" />
-          </Button>
           <Button
             tone={held ? "solid" : "ghost"}
             size="sm"
@@ -621,13 +533,32 @@ export const RadarPanel = memo(function RadarPanel({
             <SqueezeMeter squeeze={read.squeeze} />
           </div>
 
-          {/* chart — replaced, not covered, while full-screen mode is open,
-              so exactly one chart instance consumes the live data feed */}
-          {fullscreen ? (
-            <div className="border-b border-border" style={{ height: CHART_BLOCK_HEIGHT }} aria-hidden="true" />
-          ) : (
-            <ChartBlock symbol={symbol} interval={interval} chart={chart} decimals={decimals} lines={lines} />
-          )}
+          {/* chart */}
+          <div className="relative border-b border-border">
+            <div className="pointer-events-none absolute left-3 top-2 z-10 flex items-center gap-2">
+              <span className="num text-[10.5px] font-semibold uppercase tracking-[0.1em] text-foreground">
+                {symbol} · {interval}
+              </span>
+              <span className="num text-[9.5px] uppercase tracking-[0.1em] text-muted-foreground">
+                {chart.loading ? "loading history" : chart.error ? `history failed: ${chart.error}` : `${chart.bars.length} bars · live`}
+              </span>
+            </div>
+            <RadarChart bars={chart.bars} seriesKey={`${chart.symbol}:${chart.interval}`} decimals={decimals} lines={lines} />
+            <div className="num flex flex-wrap items-center gap-x-3 gap-y-1 px-3 pb-2 text-[9.5px] uppercase tracking-[0.08em] text-muted-foreground">
+              <span>
+                <span className="text-neg">— —</span> 24h high
+              </span>
+              <span>
+                <span className="text-neg">···</span> ask wall
+              </span>
+              <span>
+                <span className="text-pos">···</span> bid wall
+              </span>
+              <span>
+                <span className="text-primary">—</span> liquidation cluster
+              </span>
+            </div>
+          </div>
 
           {/* depth · tape · liquidations */}
           <div className="grid divide-y divide-border lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_minmax(0,1fr)] lg:divide-x lg:divide-y-0">
@@ -643,67 +574,5 @@ export const RadarPanel = memo(function RadarPanel({
         </>
       ) : null}
     </section>
-
-      {/* Portal to <body>: out of the page flow (no space-y margins) and
-          above every nav bar, whatever the ancestors do. */}
-      {fullscreen
-        ? createPortal(
-          <div
-            role="dialog"
-            aria-label="Full-screen chart view"
-            className="fixed inset-0 z-[70] flex flex-col bg-background"
-          >
-          <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border bg-secondary/40 px-4 py-2">
-            <div className="flex items-center gap-2">
-              <Zap className={cn("h-[13px] w-[13px]", read?.state === "signal" ? "text-neg" : "text-primary")} />
-              <h2 className="num text-[12px] font-semibold uppercase tracking-[0.14em] text-foreground">
-                Squeeze radar · {symbol}
-              </h2>
-              {read ? <Tag tone={stateTone(read.state)}>{RADAR_STATE_LABEL[read.state]}</Tag> : null}
-              {macro ? <Tag tone="muted">{macro.passedCount}/4 gates</Tag> : null}
-            </div>
-            <div className="ml-auto flex items-center gap-1.5">
-              <Segmented
-                value={interval}
-                options={CHART_INTERVALS.map((i) => ({ value: i.value, label: i.label }))}
-                onChange={onInterval}
-                className="h-7 w-[150px]"
-              />
-              <Button
-                tone="ghost"
-                size="sm"
-                onClick={() => setFullscreen(false)}
-                aria-label="Exit full-screen chart"
-                title="Exit full screen (Esc)"
-              >
-                <X className="h-[12px] w-[12px]" />
-              </Button>
-            </div>
-          </header>
-            {read ? (
-              <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,360px)]">
-                <div className="flex min-h-0 flex-col border-b border-border lg:border-b-0 lg:border-r">
-                  <ChartBlock symbol={symbol} interval={interval} chart={chart} decimals={decimals} lines={lines} fill />
-                </div>
-                <div className="min-h-0 overflow-auto">
-                  <TradeTape read={read} decimals={decimals} />
-                </div>
-              </div>
-            ) : (
-              <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
-                <Radar className="h-5 w-5 text-muted-foreground/40" />
-                <p className="num text-[11.5px] uppercase tracking-[0.12em] text-muted-foreground">
-                  {emptyReason ? EMPTY_TITLE[emptyReason] : "Attaching streams"}
-                </p>
-                <p className="max-w-[360px] text-[11px] leading-[1.5] text-muted-foreground/70">
-                  The chart opens the moment the radar read for {symbol} is live.
-                </p>
-              </div>
-            )}
-          </div>,
-          document.body,
-        )
-        : null}
-    </>
   );
 });
