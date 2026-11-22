@@ -21,7 +21,7 @@ export function Shell({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen bg-background scanlines">
       <header className="sticky top-0 z-30 border-b border-border bg-background/95 backdrop-blur">
-        <div className="mx-auto flex h-10 max-w-[1440px] items-center gap-3 px-3 sm:gap-5 sm:px-4">
+        <div className="mx-auto flex h-10 max-w-[1440px] items-center gap-5 px-4">
           <NavLink to="/" className="flex shrink-0 items-center gap-2">
             <span
               className={cn(
@@ -29,13 +29,12 @@ export function Shell({ children }: { children: ReactNode }) {
                 armedCount > 0 ? "bg-neg shadow-[0_0_8px_hsl(var(--neg))]" : "bg-primary",
               )}
             />
-            {/* Tighter wordmark under 400px so the three destinations never push the bar wider than the phone. */}
-            <span className="num text-[10.5px] font-semibold uppercase tracking-[0.1em] text-foreground min-[400px]:text-[12px] min-[400px]:tracking-[0.16em]">
+            <span className="num text-[12px] font-semibold uppercase tracking-[0.16em] text-foreground">
               Nova<span className="text-primary">Exhaustion</span>
             </span>
           </NavLink>
 
-          <nav className="flex min-w-0 items-center gap-px overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <nav className="flex items-center gap-px">
             {NAV.map(({ to, label }) => {
               const active = to === "/" ? pathname === "/" : pathname.startsWith(to);
               const isWick = to === "/";
@@ -72,7 +71,7 @@ export function Shell({ children }: { children: ReactNode }) {
             })}
           </nav>
 
-          <div className="ml-auto flex shrink-0 items-center gap-2">
+          <div className="ml-auto flex items-center gap-2">
             {armedCount > 0 ? (
               <span className="num rounded-[2px] border border-neg/40 bg-neg-soft px-1.5 py-[2px] text-[9.5px] font-semibold uppercase tracking-[0.1em] text-neg">
                 {armedCount} armed

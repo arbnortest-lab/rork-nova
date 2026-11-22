@@ -6,27 +6,27 @@ import {
   ChevronRight,
   Download,
   FileText,
-  Maximize2,
   Pause,
   Pin,
   Play,
   RefreshCw,
+  RotateCcw,
   ScanSearch,
   Search,
-  SlidersHorizontal,
+  Send,
+  ShieldCheck,
   Volume2,
   VolumeX,
   X,
 } from "lucide-react";
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 
 import { BtcTrapPanel } from "@/components/BtcTrapPanel";
-import { Button, Metric, Panel, Tag } from "@/components/kit";
+import { Button, Metric, Panel, Segmented, Tag } from "@/components/kit";
 import { OnChainBadge, OnChainDetail } from "@/components/OnChainBadge";
 import { ConfluenceMatrix } from "@/components/radar/ConfluenceMatrix";
 import { MiniImbalance, MiniSqueeze } from "@/components/radar/gauges";
 import { RadarPanel } from "@/components/radar/RadarPanel";
-import { SettingsDialog } from "@/components/SettingsDialog";
 import { Input } from "@/components/ui/input";
 import { fmtClock, fmtCompactUsd, fmtPrice, fmtSignedPct, timeAgo } from "@/lib/format";
 import {
@@ -50,11 +50,12 @@ import {
   VWAP_PINE_VERSION,
 } from "@/lib/manual";
 import type { OnChainJob } from "@/lib/onchain/schedule";
-import { chainBackendView } from "@/lib/onchainView";
+import { routeSummary } from "@/lib/radar/stream";
 import type { RadarRead } from "@/lib/radar/types";
 import type { ExhaustionRead } from "@/lib/wick/exhaustion";
+import { HORIZON_OPTIONS, REFRESH_OPTIONS } from "@/lib/wick/rules";
 import type { GateRead, SocketState, TrapSide, WickAlert } from "@/lib/wick/types";
-import { UNIVERSE_LABEL } from "@/lib/wick/universe";
+import { PRICE_BAND_LABEL, UNIVERSE_LABEL } from "@/lib/wick/universe";
 import { cn } from "@/lib/utils";
 import { useOnChain } from "@/store/OnChainProvider";
 import { RADAR_ARM_AT, useRadar } from "@/store/RadarProvider";
@@ -517,6 +518,8 @@ const AlertRow = memo(function AlertRow({
 export default function Wick() {
   const {
     rules,
+    patchRules,
+    resetRules,
     prefs,
     patchPrefs,
     reads,
@@ -536,25 +539,34 @@ export default function Wick() {
     refreshNow,
     refreshing,
     refreshedAt,
+    lastDelivery,
+    testAlert,
     requestPermission,
     permission,
   } = useWick();
 
   const {
     enabled: chainEnabled,
+    setEnabled: setChainEnabled,
+    jobs: chainJobs,
     byId: chainById,
     forSymbol: chainForSymbol,
     scanNow: chainScanNow,
     rescan: chainRescan,
+    clear: clearChain,
     busy: chainBusy,
     clock: chainNow,
     status: chainStatus,
     statusAt: chainStatusAt,
     statusFailed: chainStatusFailed,
+    verify: verifyChain,
+    verifying: chainVerifying,
+    verifyResult: chainVerify,
   } = useOnChain();
 
   const {
     enabled: radarEnabled,
+    setEnabled: setRadarEnabled,
     reads: radarReads,
     armed: radarArmed,
     focus: radarFocus,
@@ -568,8 +580,7 @@ export default function Wick() {
     now: radarNow,
   } = useRadar();
 
-  const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
-  const [theater, setTheater] = useState<boolean>(false);
+  const [showConfig, setShowConfig] = useState<boolean>(false);
   const [query, setQuery] = useState<string>("");
 
   const blocked = status.market === "blocked";
@@ -578,17 +589,14 @@ export default function Wick() {
   const focusJob = useMemo(() => chainForSymbol(prefs.selected), [chainForSymbol, prefs.selected]);
   const onScanNow = useCallback(() => chainScanNow(prefs.selected), [chainScanNow, prefs.selected]);
 
-  const chainBackend = useMemo(
-    () =>
-      chainBackendView({
-        enabled: chainEnabled,
-        statusAt: chainStatusAt,
-        statusFailed: chainStatusFailed,
-        configured: chainStatus?.configured,
-        busy: chainBusy,
-      }),
-    [chainEnabled, chainStatusAt, chainStatusFailed, chainStatus?.configured, chainBusy],
-  );
+  const chainBackend = useMemo<{ text: string; tone: "muted" | "pos" | "warn" | "brand" } | null>(() => {
+    if (!chainEnabled) return { text: "off", tone: "muted" };
+    if (chainStatusAt === 0) return null;
+    if (chainStatusFailed || !chainStatus) return { text: "offline", tone: "warn" };
+    if (!chainStatus.configured) return { text: "no key", tone: "warn" };
+    if (chainBusy) return { text: "scanning", tone: "brand" };
+    return { text: "ready", tone: "pos" };
+  }, [chainEnabled, chainStatusAt, chainStatusFailed, chainStatus, chainBusy]);
 
   const candidates = useMemo(() => {
     const q = query.trim().toUpperCase();
@@ -607,21 +615,6 @@ export default function Wick() {
   );
 
   const onTogglePin = useCallback(() => togglePin(prefs.selected), [togglePin, prefs.selected]);
-
-  /* Theater mode: Escape closes the overlay and the page behind it stops scrolling. */
-  useEffect(() => {
-    if (!theater) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setTheater(false);
-    };
-    window.addEventListener("keydown", onKey);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      document.body.style.overflow = prevOverflow;
-    };
-  }, [theater]);
 
   return (
     <div className="space-y-3">
@@ -662,6 +655,12 @@ export default function Wick() {
             {!status.restOk ? <Tag tone="warn">REST blocked</Tag> : null}
             {chainBackend ? <Tag tone={chainBackend.tone}>ON-CHAIN {chainBackend.text}</Tag> : null}
 
+            <Segmented
+              value={String(rules.refreshMs)}
+              options={REFRESH_OPTIONS.map((o) => ({ value: String(o.value), label: o.label }))}
+              onChange={(v) => patchRules({ refreshMs: Number(v) })}
+              className="w-[132px]"
+            />
             <Button
               tone={prefs.paused ? "solid" : "outline"}
               size="sm"
@@ -677,7 +676,6 @@ export default function Wick() {
               onClick={() => (permission === "granted" ? patchPrefs({ desktop: !prefs.desktop }) : requestPermission())}
               title={permission === "granted" ? "Toggle desktop notifications" : "Grant desktop notifications"}
               aria-label="Desktop notifications"
-              aria-pressed={prefs.desktop && permission === "granted"}
             >
               {prefs.desktop && permission === "granted" ? (
                 <Bell className="h-[13px] w-[13px]" />
@@ -691,20 +689,11 @@ export default function Wick() {
               onClick={() => patchPrefs({ sound: !prefs.sound })}
               title="Toggle chime"
               aria-label="Sound"
-              aria-pressed={prefs.sound}
             >
               {prefs.sound ? <Volume2 className="h-[13px] w-[13px]" /> : <VolumeX className="h-[13px] w-[13px]" />}
             </Button>
-            <Button
-              tone="outline"
-              size="sm"
-              onClick={() => setSettingsOpen(true)}
-              title="Gate thresholds, alert channels, radar and on-chain settings"
-              aria-haspopup="dialog"
-              aria-expanded={settingsOpen}
-            >
-              <SlidersHorizontal className="h-[12px] w-[12px]" />
-              Settings
+            <Button tone="ghost" size="sm" onClick={() => setShowConfig((v) => !v)}>
+              Config
             </Button>
           </div>
         </div>
@@ -722,143 +711,304 @@ export default function Wick() {
         ) : null}
       </section>
 
-      {/* ---------------- settings (modal) ---------------- */}
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
-
-      {/* ---------------- theater (full-viewport alert feed overlay) ---------------- */}
-      {theater ? (
-        <div
-          className="fixed inset-0 z-[70] flex flex-col bg-background"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Alert feed — theater view"
-        >
-          <header className="flex shrink-0 items-center justify-between gap-3 border-b border-line-soft px-3 py-2">
-            <div className="num text-[12px] font-semibold uppercase tracking-[0.14em] text-foreground">
-              Alert feed{unseen > 0 ? ` — ${unseen} new` : ""}
-            </div>
-            <Button tone="ghost" size="sm" onClick={() => setTheater(false)} title="Close theater view">
-              <X className="h-3.5 w-3.5" />
-              Close
+      {/* ---------------- config ---------------- */}
+      {showConfig ? (
+        <Panel
+          title="Gate thresholds"
+          aside={
+            <Button tone="ghost" size="sm" onClick={resetRules}>
+              <RotateCcw className="h-[11px] w-[11px]" />
+              Defaults
             </Button>
-          </header>
-          <div className="min-h-0 flex-1 overflow-auto">
-            {alerts.length === 0 ? (
-              <div className="flex h-full items-center justify-center px-3 py-8 text-center">
-                <div>
-                  <p className="num text-[11.5px] uppercase tracking-[0.12em] text-muted-foreground">No signals yet</p>
-                  <p className="mx-auto mt-1.5 max-w-[360px] text-[11px] leading-[1.5] text-muted-foreground/70">
-                    A contract has to pin its 24h high, spike and cool its volume, print a rejected higher high, and run
-                    out of upside liquidity — all at once. Signals land here the moment that happens.
-                  </p>
-                </div>
+          }
+        >
+          <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div>
+              <div className="lbl mb-1">Pin distance</div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min={0.5}
+                  max={50}
+                  step={0.5}
+                  value={rules.pinBps}
+                  onChange={(e) => patchRules({ pinBps: Number(e.target.value) })}
+                  className="h-1 flex-1 accent-primary"
+                  aria-label="Pin distance from the 24h high, in basis points"
+                />
+                <span className="num w-14 text-right text-[12.5px] font-semibold text-primary">{rules.pinBps} bps</span>
               </div>
-            ) : (
-              <ul>
-                {alerts.map((alert) => (
-                  <AlertRow
-                    key={alert.id}
-                    alert={alert}
-                    onSelect={onSelect}
-                    onDismiss={dismiss}
-                    job={chainById.get(alert.id)}
-                    now={chainNow}
-                    onRescan={chainRescan}
-                  />
-                ))}
-              </ul>
-            )}
+            </div>
+            <div>
+              <div className="lbl mb-1">Volume climax</div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min={150}
+                  max={1000}
+                  step={10}
+                  value={rules.rvolClimax}
+                  onChange={(e) => patchRules({ rvolClimax: Number(e.target.value) })}
+                  className="h-1 flex-1 accent-primary"
+                  aria-label="Relative volume climax threshold"
+                />
+                <span className="num w-11 text-right text-[12.5px] font-semibold">{rules.rvolClimax}%</span>
+              </div>
+            </div>
+            <div>
+              <div className="lbl mb-1">Rejection wick</div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min={45}
+                  max={95}
+                  step={1}
+                  value={rules.wickPct}
+                  onChange={(e) => patchRules({ wickPct: Number(e.target.value) })}
+                  className="h-1 flex-1 accent-primary"
+                  aria-label="Rejection wick as a share of the candle range"
+                />
+                <span className="num w-11 text-right text-[12.5px] font-semibold">{rules.wickPct}%</span>
+              </div>
+            </div>
+            <div>
+              <div className="lbl mb-1">Depletion band</div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min={0}
+                  max={5}
+                  step={0.1}
+                  value={rules.depletionPct}
+                  onChange={(e) => patchRules({ depletionPct: Number(e.target.value) })}
+                  className="h-1 flex-1 accent-primary"
+                  aria-label="Distance to the long-horizon high that counts as swept"
+                />
+                <span className="num w-11 text-right text-[12.5px] font-semibold">
+                  {rules.depletionPct.toFixed(1)}%
+                </span>
+              </div>
+            </div>
+            <div>
+              <div className="lbl mb-1">Liquidity horizon</div>
+              <Segmented
+                value={String(rules.horizonDays)}
+                options={HORIZON_OPTIONS.map((o) => ({ value: String(o.value), label: o.label }))}
+                onChange={(v) => patchRules({ horizonDays: Number(v) })}
+              />
+            </div>
+            <div>
+              <div className="lbl mb-1">History slots</div>
+              <Segmented
+                value={String(rules.deepWatch)}
+                options={[
+                  { value: "6", label: "6" },
+                  { value: "12", label: "12" },
+                  { value: "18", label: "18" },
+                  { value: "24", label: "24" },
+                ]}
+                onChange={(v) => patchRules({ deepWatch: Number(v) })}
+              />
+            </div>
+            <div>
+              <div className="lbl mb-1">Min 24h turnover</div>
+              <Segmented
+                value={String(rules.minVolume)}
+                options={[
+                  { value: "0", label: "Any" },
+                  { value: "1000000", label: "$1M" },
+                  { value: "5000000", label: "$5M" },
+                  { value: "25000000", label: "$25M" },
+                ]}
+                onChange={(v) => patchRules({ minVolume: Number(v) })}
+              />
+            </div>
+            <div>
+              <div className="lbl mb-1">Cooldown</div>
+              <Segmented
+                value={String(rules.cooldownMins)}
+                options={[
+                  { value: "5", label: "5m" },
+                  { value: "15", label: "15m" },
+                  { value: "30", label: "30m" },
+                  { value: "120", label: "2h" },
+                ]}
+                onChange={(v) => patchRules({ cooldownMins: Number(v) })}
+              />
+            </div>
           </div>
-        </div>
+
+          <div className="mt-4 border-t border-line-soft pt-3">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+              <span className="lbl">Universe</span>
+              <Tag tone="brand">{UNIVERSE_LABEL}</Tag>
+            </div>
+            <p className="num text-[10px] leading-[1.5] text-muted-foreground">
+              Bitcoin always, plus any altcoin whose live price sits strictly inside {PRICE_BAND_LABEL}. The test runs
+              on every pass: a contract that crosses out of the band leaves the scanner on the next tick and returns
+              only once its price is back inside. Right now {tracked} of {status.universe || tracked + excluded}{" "}
+              perpetuals qualify and {excluded} sit outside the band. Multiplied contracts (1000PEPE, 1000SHIB…) are
+              judged on the price they trade at.
+            </p>
+          </div>
+
+          <div className="mt-4 border-t border-line-soft pt-3">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <span className="lbl">Alert channels</span>
+              <Button tone="outline" size="sm" onClick={testAlert}>
+                <Send className="h-[11px] w-[11px]" />
+                Send test
+              </Button>
+            </div>
+            <div className="grid gap-x-4 gap-y-3 sm:grid-cols-3">
+              <div>
+                <div className="lbl mb-1">Telegram bot token</div>
+                <Input
+                  value={prefs.telegramToken}
+                  onChange={(e) => patchPrefs({ telegramToken: e.target.value })}
+                  placeholder="123456:ABC-DEF…"
+                  className="h-8 text-[12px]"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </div>
+              <div>
+                <div className="lbl mb-1">Telegram chat id</div>
+                <Input
+                  value={prefs.telegramChatId}
+                  onChange={(e) => patchPrefs({ telegramChatId: e.target.value })}
+                  placeholder="-1001234567890"
+                  className="h-8 text-[12px]"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </div>
+              <div>
+                <div className="lbl mb-1">Discord webhook</div>
+                <Input
+                  value={prefs.discordWebhook}
+                  onChange={(e) => patchPrefs({ discordWebhook: e.target.value })}
+                  placeholder="https://discord.com/api/webhooks/…"
+                  className="h-8 text-[12px]"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </div>
+            </div>
+            <p className="num mt-2 text-[10px] leading-[1.5] text-muted-foreground">
+              Sent straight from this browser — no relay server. Credentials stay in this browser&apos;s local storage.
+              {lastDelivery.length
+                ? ` Last dispatch: ${lastDelivery
+                    .map((d) => `${d.channel} ${d.ok ? "ok" : `failed (${d.error ?? "error"})`}`)
+                    .join(", ")}.`
+                : ""}
+            </p>
+          </div>
+
+          {/* ---- squeeze radar (micro layer) ---- */}
+          <div className="mt-4 border-t border-line-soft pt-3">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+              <span className="lbl">Squeeze radar · micro layer</span>
+              <div className="flex items-center gap-1.5">
+                <Tag
+                  tone={radarEnabled ? (radarStatus.state === "open" ? "pos" : "warn") : "muted"}
+                  title={radarEnabled ? routeSummary(radarStatus, radarNow) : undefined}
+                >
+                  public {radarEnabled ? radarStatus.routes.public.state : "off"}
+                </Tag>
+                <Tag
+                  tone={radarEnabled ? (radarStatus.routes.market.state === "open" ? "pos" : "warn") : "muted"}
+                  title={radarEnabled ? routeSummary(radarStatus, radarNow) : undefined}
+                >
+                  market {radarEnabled ? radarStatus.routes.market.state : "off"}
+                </Tag>
+                <Button tone={radarEnabled ? "outline" : "solid"} size="sm" onClick={() => setRadarEnabled(!radarEnabled)}>
+                  {radarEnabled ? "Disable" : "Enable"}
+                </Button>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-start gap-x-5 gap-y-2.5">
+              <Metric label="Attached" value={String(radarReads.size)} size="sm" tone={radarReads.size ? "brand" : "muted"} />
+              <Metric label="Armed" value={String(radarArmed.length)} size="sm" tone={radarArmed.length ? "warn" : "muted"} />
+              <Metric label="Streams" value={String(radarStreams.length)} size="sm" />
+              <Metric label="Held" value={String(radarHolds.length)} size="sm" />
+              <Metric label="Frames" value={radarStatus.messages.toLocaleString("en-US")} size="sm" />
+              <Metric label="Reconnects" value={String(radarStatus.retries)} size="sm" tone={radarStatus.retries ? "warn" : "muted"} />
+            </div>
+            <p className="num mt-2 text-[10px] leading-[1.5] text-muted-foreground">
+              Two routed Binance Futures sockets — the public one carries order-book depth, the market one carries
+              aggressive trades, mark price, the chart&apos;s klines and liquidations. When a contract reaches {RADAR_ARM_AT} of 4
+              gates its depth (20 levels, 100ms), aggressive trades and mark price are subscribed live; the venue-wide
+              liquidation stream is shared by every armed contract. Streams unsubscribe two minutes after a contract falls below the line, unless it is
+              in focus or held. The radar reads the gates&apos; verdict and never feeds back into it.
+              {radarStatus.lastError ? ` Last socket note: ${radarStatus.lastError}.` : ""}
+            </p>
+          </div>
+
+          {/* ---- on-chain add-on ---- */}
+          <div className="mt-4 border-t border-line-soft pt-3">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+              <span className="lbl">On-chain intelligence · Arkham</span>
+              <div className="flex items-center gap-1.5">
+                {chainJobs.length ? (
+                  <Button tone="ghost" size="sm" onClick={clearChain}>
+                    Clear scans
+                  </Button>
+                ) : null}
+                <Button tone="ghost" size="sm" onClick={verifyChain} disabled={chainVerifying}>
+                  <ShieldCheck className="h-[11px] w-[11px]" />
+                  {chainVerifying ? "Checking…" : "Verify key"}
+                </Button>
+                <Button tone={chainEnabled ? "outline" : "solid"} size="sm" onClick={() => setChainEnabled(!chainEnabled)}>
+                  {chainEnabled ? "Disable" : "Enable"}
+                </Button>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-start gap-x-5 gap-y-2.5">
+              <Metric
+                label="Backend"
+                value={chainBackend ? chainBackend.text : "checking"}
+                size="sm"
+                tone={chainBackend ? chainBackend.tone : "muted"}
+              />
+              <Metric
+                label="Credits today"
+                value={
+                  chainStatus
+                    ? `${chainStatus.today.credits.toLocaleString("en-US")} / ${chainStatus.creditCap.toLocaleString("en-US")}`
+                    : "—"
+                }
+                size="sm"
+                tone={chainStatus && chainStatus.today.credits >= chainStatus.creditCap ? "warn" : "default"}
+              />
+              <Metric label="Scans today" value={chainStatus ? String(chainStatus.today.scans) : "—"} size="sm" />
+              <Metric
+                label="Failures"
+                value={chainStatus ? String(chainStatus.today.failures) : "—"}
+                size="sm"
+                tone={chainStatus && chainStatus.today.failures > 0 ? "warn" : "muted"}
+              />
+              <Metric
+                label="Queue"
+                value={chainStatus ? String(chainStatus.queue + (chainStatus.inFlight ? 1 : 0)) : "—"}
+                size="sm"
+              />
+              <Metric label="Tracked signals" value={String(chainJobs.length)} size="sm" />
+            </div>
+            <p className="num mt-2 text-[10px] leading-[1.5] text-muted-foreground">
+              Every signal is checked for $100k–$500k exchange flows in the 15 minutes before and 2 minutes after it.
+              The scan runs on the backend with the Arkham key kept server-side: an early read at once, the final
+              read 5 minutes later. The engine never waits on it.
+              {chainVerify ? ` Key check: ${chainVerify.message}.` : ""}
+              {chainStatus?.lastError ? ` Last backend error: ${chainStatus.lastError}.` : ""}
+            </p>
+          </div>
+        </Panel>
       ) : null}
 
-      {/*
-       * Focus + feed. Below `xl` everything stacks in one column with the
-       * alert feed first, so a signal is the first thing on a phone. At `xl`
-       * the feed heads a 400px side column and the engine panels span both
-       * rows on the left. The explicit `minmax(0,1fr)` track is what stops
-       * wide children (chip strip, tables, chart) from stretching the page.
-       */}
-      <div className="grid grid-cols-[minmax(0,1fr)] gap-3 xl:grid-cols-[minmax(0,1fr)_400px] xl:grid-rows-[auto_1fr]">
-        <div className="min-w-0 xl:col-start-2 xl:row-start-1">
-          <Panel
-            title={`Alert feed${unseen ? ` — ${unseen} new` : ""}`}
-            flush
-            aside={
-              <div className="flex items-center gap-1.5">
-                <Button
-                  tone="ghost"
-                  size="sm"
-                  onClick={() => setTheater(true)}
-                  className="px-2"
-                  aria-label="Expand alert feed"
-                  aria-haspopup="dialog"
-                  title="Theater view"
-                >
-                  <Maximize2 className="h-3 w-3" />
-                </Button>
-                {unseen > 0 ? (
-                  <Button tone="ghost" size="sm" onClick={markAllSeen}>
-                    Mark read
-                  </Button>
-                ) : null}
-                {alerts.length > 0 ? (
-                  <Button tone="ghost" size="sm" onClick={clearAlerts}>
-                    Clear
-                  </Button>
-                ) : null}
-              </div>
-            }
-          >
-            {/* Manual refresh — forces every cached input to be re-fetched now. */}
-            <div className="flex items-center gap-2 border-b border-line-soft px-2.5 py-2">
-              <Button
-                tone="outline"
-                size="sm"
-                onClick={refreshNow}
-                disabled={refreshing}
-                className="shrink-0"
-                title="Re-fetch prices and candles now, ignoring the cache"
-              >
-                <RefreshCw className={cn("h-3 w-3", refreshing && "animate-spin")} />
-                {refreshing ? "Refreshing" : "Refresh"}
-              </Button>
-              <span className="num min-w-0 truncate text-[10px] leading-[1.4] text-muted-foreground">
-                {refreshing
-                  ? "Fetching the latest prints…"
-                  : refreshedAt
-                    ? `Manual refresh ${timeAgo(refreshedAt)} · auto ${scannedAt ? fmtClock(scannedAt) : "—"}`
-                    : `Auto-scanning every ${Math.round(rules.refreshMs / 1000)}s`}
-              </span>
-            </div>
-
-            {alerts.length === 0 ? (
-              <div className="px-3 py-8 text-center">
-                <p className="num text-[11.5px] uppercase tracking-[0.12em] text-muted-foreground">No signals yet</p>
-                <p className="mx-auto mt-1.5 max-w-[360px] text-[11px] leading-[1.5] text-muted-foreground/70">
-                  A contract has to pin its 24h high, spike and cool its volume, print a rejected higher high, and run
-                  out of upside liquidity — all at once. Signals land here the moment that happens.
-                </p>
-              </div>
-            ) : (
-              <ul className="max-h-[560px] overflow-auto">
-                {alerts.map((alert) => (
-                  <AlertRow
-                    key={alert.id}
-                    alert={alert}
-                    onSelect={onSelect}
-                    onDismiss={dismiss}
-                    job={chainById.get(alert.id)}
-                    now={chainNow}
-                    onRescan={chainRescan}
-                  />
-                ))}
-              </ul>
-            )}
-          </Panel>
-        </div>
-
-        <div className="min-w-0 space-y-3 xl:col-start-1 xl:row-span-2 xl:row-start-1">
+      {/* ---------------- focus + feed ---------------- */}
+      <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_400px]">
+        <div className="space-y-3">
           {/* contract selector */}
           <section className="panel flex flex-wrap items-center gap-2 px-3 py-2">
             <div className="relative w-[164px] shrink-0">
@@ -933,7 +1083,72 @@ export default function Wick() {
           />
         </div>
 
-        <div className="min-w-0 space-y-3 xl:col-start-2 xl:row-start-2">
+        <div className="space-y-3">
+          <Panel
+            title={`Alert feed${unseen ? ` — ${unseen} new` : ""}`}
+            flush
+            aside={
+              <div className="flex items-center gap-1.5">
+                {unseen > 0 ? (
+                  <Button tone="ghost" size="sm" onClick={markAllSeen}>
+                    Mark read
+                  </Button>
+                ) : null}
+                {alerts.length > 0 ? (
+                  <Button tone="ghost" size="sm" onClick={clearAlerts}>
+                    Clear
+                  </Button>
+                ) : null}
+              </div>
+            }
+          >
+            {/* Manual refresh — forces every cached input to be re-fetched now. */}
+            <div className="flex items-center gap-2 border-b border-line-soft px-2.5 py-2">
+              <Button
+                tone="outline"
+                size="sm"
+                onClick={refreshNow}
+                disabled={refreshing}
+                className="shrink-0"
+                title="Re-fetch prices and candles now, ignoring the cache"
+              >
+                <RefreshCw className={cn("h-3 w-3", refreshing && "animate-spin")} />
+                {refreshing ? "Refreshing" : "Refresh"}
+              </Button>
+              <span className="num truncate text-[10px] leading-[1.4] text-muted-foreground">
+                {refreshing
+                  ? "Fetching the latest prints…"
+                  : refreshedAt
+                    ? `Manual refresh ${timeAgo(refreshedAt)} · auto ${scannedAt ? fmtClock(scannedAt) : "—"}`
+                    : `Auto-scanning every ${Math.round(rules.refreshMs / 1000)}s`}
+              </span>
+            </div>
+
+            {alerts.length === 0 ? (
+              <div className="px-3 py-10 text-center">
+                <p className="num text-[11.5px] uppercase tracking-[0.12em] text-muted-foreground">No signals yet</p>
+                <p className="mt-1.5 text-[11px] leading-[1.5] text-muted-foreground/70">
+                  A contract has to pin its 24h high, spike and cool its volume, print a rejected higher high, and run
+                  out of upside liquidity — all at once.
+                </p>
+              </div>
+            ) : (
+              <ul className="max-h-[560px] overflow-auto">
+                {alerts.map((alert) => (
+                  <AlertRow
+                    key={alert.id}
+                    alert={alert}
+                    onSelect={onSelect}
+                    onDismiss={dismiss}
+                    job={chainById.get(alert.id)}
+                    now={chainNow}
+                    onRescan={chainRescan}
+                  />
+                ))}
+              </ul>
+            )}
+          </Panel>
+
           {/* ---------------- BTCUSDT failed-breakout log ---------------- */}
           <BtcTrapPanel />
 

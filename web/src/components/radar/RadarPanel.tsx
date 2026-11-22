@@ -455,7 +455,7 @@ export const RadarPanel = memo(function RadarPanel({
           <p className="num text-[11.5px] uppercase tracking-[0.12em] text-muted-foreground">{EMPTY_TITLE[emptyReason]}</p>
           <p className="max-w-[360px] text-[11px] leading-[1.5] text-muted-foreground/70">
             {emptyReason === "off"
-              ? "Enable the radar under Settings → Radar to stream depth, trades and liquidations for armed contracts."
+              ? "Enable the radar in Config to stream depth, trades and liquidations for armed contracts."
               : emptyReason === "paused"
                 ? "Resume the engine to reopen the radar socket."
                 : `Subscribing ${symbol} to depth on the public socket and trades, mark price and liquidations on the market socket. First frames land within a second or two.`}

@@ -147,7 +147,7 @@ export const ConfluenceMatrix = memo(function ConfluenceMatrix({
         <p className="num px-3 py-2.5 text-[10.5px] leading-[1.5] text-muted-foreground">
           {enabled
             ? "Radar idle. Depth, trades, mark price and liquidation streams attach automatically the moment a contract reaches 3 of 4 gates, and detach two minutes after it falls away. Only the focused contract streams right now."
-            : "Radar off. Enable it under Settings → Radar to attach live micro-structure streams to armed contracts."}
+            : "Radar off. Enable it in Config to attach live micro-structure streams to armed contracts."}
         </p>
       ) : (
         <div className="overflow-x-auto">
