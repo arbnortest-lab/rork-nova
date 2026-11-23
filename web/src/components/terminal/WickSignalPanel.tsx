@@ -60,6 +60,8 @@ export function WickSignalPanel({ signals, className }: { signals: WickSignal[];
   }, [signals, pair, type, sort, query]);
 
   const upper = rows.filter((s) => s.type === "upper").length;
+  const btcCount = signals.filter((s) => s.symbol.startsWith("BTC")).length;
+  const usdcCount = signals.filter((s) => s.symbol.startsWith("USDC")).length;
 
   return (
     <div className={cn("flex min-h-0 flex-col", className)}>
@@ -69,9 +71,9 @@ export function WickSignalPanel({ signals, className }: { signals: WickSignal[];
           <Segmented<PairFilter>
             value={pair}
             options={[
-              { value: "all", label: "All pairs" },
-              { value: "BTC", label: "BTC" },
-              { value: "USDC", label: "USDC" },
+              { value: "all", label: `All · ${signals.length}` },
+              { value: "BTC", label: `BTC · ${btcCount}` },
+              { value: "USDC", label: `USDC · ${usdcCount}` },
             ]}
             onChange={setPair}
             className="h-7 flex-1"
@@ -163,10 +165,10 @@ export function WickSignalPanel({ signals, className }: { signals: WickSignal[];
                 const dec = decimalsOf(s);
                 return (
                   <tr key={s.id}>
-                    <td className="num whitespace-nowrap text-[10.5px] text-muted-foreground" title={new Date(s.signalTime).toLocaleString()}>
+                    <td className="num whitespace-nowrap text-[11px] text-muted-foreground" title={new Date(s.signalTime).toLocaleString()}>
                       {timeAgo(s.signalTime)}
                     </td>
-                    <td className="num text-[10.5px] font-semibold">
+                    <td className="num text-[11.5px] font-semibold">
                       {s.symbol.replace("USDT", "")}
                       <span
                         className={cn(
@@ -177,23 +179,23 @@ export function WickSignalPanel({ signals, className }: { signals: WickSignal[];
                         {s.type === "upper" ? "▲U" : "▼L"}
                       </span>
                     </td>
-                    <td className="num text-right text-[10.5px]">{fmtPrice(s.wickSize, dec)}</td>
-                    <td className="num text-right text-[10.5px] font-semibold">{s.wickPct.toFixed(1)}%</td>
-                    <td className="num text-right text-[10.5px] text-muted-foreground">{fmtCompactUsd(s.wickUsdt)}</td>
+                    <td className="num text-right text-[11.5px]">{fmtPrice(s.wickSize, dec)}</td>
+                    <td className="num text-right text-[11.5px] font-semibold">{s.wickPct.toFixed(1)}%</td>
+                    <td className="num text-right text-[11.5px] text-muted-foreground">{fmtCompactUsd(s.wickUsdt)}</td>
                     <td
                       className={cn(
-                        "num text-right text-[10.5px]",
+                        "num text-right text-[11.5px]",
                         !Number.isFinite(s.rvol) ? "text-muted-foreground/50" : s.rvol >= 200 ? "text-warn" : undefined,
                       )}
                     >
                       {Number.isFinite(s.rvol) ? `${Math.round(s.rvol)}%` : EMPTY}
                     </td>
-                    <td className="num text-right text-[10.5px]">
+                    <td className="num text-right text-[11.5px]">
                       {s.distHighPct === undefined ? EMPTY : `${s.distHighPct.toFixed(2)}%`}
                     </td>
                     <td
                       className={cn(
-                        "num text-right text-[10.5px]",
+                        "num text-right text-[11.5px]",
                         s.fundingRate === undefined ? "text-muted-foreground/50" : s.fundingRate >= 0 ? "text-neg" : "text-pos",
                       )}
                     >

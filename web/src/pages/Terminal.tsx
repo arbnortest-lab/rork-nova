@@ -1,20 +1,23 @@
 /**
- * Terminal — the V2 dashboard. Two instruments, always on.
+ * Terminal — the NOVAEXHAUSTION trading surface. Two instruments, always on.
  *
- * Layout (every boundary draggable, panels remember nothing between reloads
- * except their default proportions):
+ * Layout (columns drag-resize; sections collapse; the chart goes fullscreen):
  *
- *   ┌ instrument selector + statuses────────────────────────────┐
- *   │ LEFT        │ CENTER              │ RIGHT                  │
- *   │ overview    │ chart (fullscreen)  │ wick signal monitor    │
- *   │ order book  │ OI & funding        │ alert center           │
- *   │ walls       │ squeeze + liqs      │ exhaustion engine      │
- *   │ whale tape  │                     │ confluence             │
- *   ├ bottom tabs: squeeze history · data quality · settings ·    │
- *   │  BTC trap log · pine & docs ─────────────────────────────── │
+ *   ┌ pair · big price · engine stats · stream status ────────────┐
+ *   │ LEFT 17%      │ CENTER 58%                │ RIGHT 25%        │
+ *   │ market        │ CHART (dominant,          │ wick signals     │
+ *   │ intelligence  │  fullscreen, zoom)        │  (primary)       │
+ *   │ · overview    │ lower tabs:               │ exhaustion       │
+ *   │ · order book  │  OI & funding             │ alerts           │
+ *   │ · walls       │  squeeze radar            │ confluence       │
+ *   │ · whales      │  liquidations             │                  │
+ *   │ · liquidations│                           │                  │
+ *   ├ bottom workspace: wick · squeeze · liquidation · BTC · USDC ·  │
+ *   │  engine history · data quality · configuration ────────────────│
  *
  * Data comes from the untouched four-gate engine (WickProvider) and the
  * always-on InstrumentsProvider layer; neither receives anything from here.
+ * This file is presentation only.
  */
 
 import { Panel as RPPanel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
@@ -22,11 +25,11 @@ import { Activity, RefreshCw } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 
 import { BtcTrapPanel } from "@/components/BtcTrapPanel";
-import { Button, Metric, Tag } from "@/components/kit";
+import { Button, CollapsibleSection, Metric, Tag } from "@/components/kit";
 import { DepthTable, LiquidationsPane, TradeTape } from "@/components/radar/RadarPanel";
 import { routeSummary } from "@/lib/radar/stream";
-import { fmtCompactUsd, fmtPrice, priceDecimals, timeAgo } from "@/lib/format";
-import { TRACKED_SYMBOLS, UNIVERSE_LABEL } from "@/lib/wick/universe";
+import { fmtCompactUsd, fmtPrice, fmtSignedPct, priceDecimals, timeAgo } from "@/lib/format";
+import { TRACKED_SYMBOLS } from "@/lib/wick/universe";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/lib/theme";
 import { useAlertCenter } from "@/store/AlertCenterProvider";
@@ -61,7 +64,7 @@ function Handle({ className }: { className?: string }) {
   return (
     <PanelResizeHandle
       className={cn(
-        "group relative flex shrink-0 items-center justify-center bg-line-soft transition-colors hover:bg-primary/40 data-[resize-handle-state=drag]:bg-primary",
+        "group relative flex shrink-0 items-center justify-center bg-background transition-colors hover:bg-primary/40 data-[resize-handle-state=drag]:bg-primary",
         className,
       )}
     >
@@ -70,58 +73,120 @@ function Handle({ className }: { className?: string }) {
   );
 }
 
-/** Current squeeze read for the focused instrument, beside its liquidation tape. */
-function SqueezeLive({
-  symbol,
-  read,
-  now,
-}: {
-  symbol: string;
-  read: import("@/store/InstrumentsProvider").InstrumentRead | undefined;
-  now: number;
-}) {
+/** A squeezed-instrument read without its liquidation tape — the lower "Squeeze radar" tab. */
+function SqueezeRadar({ symbol, read, now }: { symbol: string; read: import("@/store/InstrumentsProvider").InstrumentRead | undefined; now: number }) {
   const s = read?.squeeze;
   return (
-    <RPPanel className="min-h-0">
-      <section className="panel flex h-full min-h-0 flex-col">
-        <header className="flex shrink-0 items-center gap-2 border-b border-border bg-secondary/40 px-2.5 py-1.5">
-          <h2 className="lbl">Squeeze · {symbol.replace("USDT", "")}</h2>
-          {s ? (
-            <Tag tone={s.level === "hot" ? "neg" : s.level === "warm" ? "warn" : "pos"}>{s.level.toUpperCase()}</Tag>
-          ) : (
-            <Tag tone="muted">NOT AVAILABLE</Tag>
-          )}
-        </header>
-        {s && read ? (
-          <div className="min-h-0 flex-1 overflow-auto">
-            <div className="grid grid-cols-4 gap-2 px-2.5 py-2">
-              <Metric label="Forced 1h" value={fmtCompactUsd(s.volume)} size="sm" tone={s.level === "cold" ? "muted" : "neg"} />
-              <Metric label="Shorts liq" value={fmtCompactUsd(s.shortLiq)} size="sm" tone="pos" />
-              <Metric label="Longs liq" value={fmtCompactUsd(s.longLiq)} size="sm" tone="neg" />
-              <Metric label="Events" value={String(s.count)} size="sm" />
-            </div>
-            <p className="num border-t border-line-soft px-2.5 py-1 text-[9.5px] uppercase tracking-[0.08em] text-muted-foreground">
-              direction {s.direction.replace("-", " ")} · thresholds {fmtCompactUsd(s.medAt)} / {fmtCompactUsd(s.highAt)}
-              {s.lastAt ? ` · last ${timeAgo(s.lastAt, now)}` : ""}
-            </p>
-            <LiquidationsPane read={read} decimals={priceDecimals(read.depth.mid ?? 1)} />
-          </div>
+    <div className="p-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Metric
+          label="Forced 1h"
+          value={s ? fmtCompactUsd(s.volume) : "n/a"}
+          tone={s?.level === "cold" ? "muted" : s ? "neg" : "muted"}
+        />
+        <Metric label="Shorts liquidated" value={s ? fmtCompactUsd(s.shortLiq) : "n/a"} tone={s ? "pos" : "muted"} />
+        <Metric label="Longs liquidated" value={s ? fmtCompactUsd(s.longLiq) : "n/a"} tone={s ? "neg" : "muted"} />
+        <Metric label="Events" value={s ? String(s.count) : "n/a"} />
+      </div>
+      <p className="num mt-3 border-t border-line-soft pt-2 text-[10.5px] uppercase tracking-[0.08em] text-muted-foreground">
+        {s ? (
+          <>
+            level <span className={cn("font-semibold", s.level === "hot" ? "text-neg" : s.level === "warm" ? "text-warn" : "text-pos")}>{s.level}</span>
+            {" · "}direction {s.direction.replace("-", " ")}
+            {" · "}thresholds {fmtCompactUsd(s.medAt)} / {fmtCompactUsd(s.highAt)}
+            {s.lastAt ? ` · last event ${timeAgo(s.lastAt, now)}` : ""}
+          </>
         ) : (
-          <p className="num px-3 py-6 text-center text-[11px] text-muted-foreground/70">
-            Liquidation stream connecting — forced orders land here within seconds.
-          </p>
+          "Liquidation stream connecting — the squeeze read for " + symbol + " lands here within seconds."
         )}
-      </section>
-    </RPPanel>
+      </p>
+    </div>
   );
 }
 
+/** One instrument's full analysis for the bottom workspace, from existing modules only. */
+function SymbolAnalysis({
+  symbol,
+  reads,
+  macros,
+  vwaps,
+  selected,
+  onSelect,
+  now,
+  macro,
+  vwap,
+  signals,
+  squeezeHistory,
+}: {
+  symbol: string;
+  reads: Map<string, import("@/store/InstrumentsProvider").InstrumentRead>;
+  macros: Map<string, import("@/lib/wick/exhaustion").ExhaustionRead | undefined>;
+  vwaps: Map<string, import("@/lib/wick/types").VwapRead | undefined>;
+  selected: string;
+  onSelect: (symbol: string) => void;
+  now: number;
+  macro: import("@/lib/wick/exhaustion").ExhaustionRead | undefined;
+  vwap: import("@/lib/wick/types").VwapRead | undefined;
+  signals: import("@/lib/signals/wickSignal").WickSignal[];
+  squeezeHistory: import("@/store/InstrumentsProvider").SqueezeSample[];
+}) {
+  return (
+    <div className="grid gap-2 p-2 xl:grid-cols-2">
+      <section className="panel overflow-hidden">
+        <header className="panel-head">
+          <h2 className="lbl">Market overview · {symbol}</h2>
+          <Tag tone="muted">{symbol === selected ? "focused" : "click card to focus"}</Tag>
+        </header>
+        <MarketOverviewPanel
+          symbols={[symbol]}
+          reads={reads}
+          macros={macros}
+          vwaps={vwaps}
+          selected={selected}
+          onSelect={onSelect}
+          now={now}
+        />
+      </section>
+      <section className="panel overflow-hidden">
+        <header className="panel-head">
+          <h2 className="lbl">Open interest & funding · {symbol}</h2>
+        </header>
+        <OiFundingPanel reads={reads} order={[symbol]} now={now} />
+      </section>
+      <section className="panel overflow-hidden">
+        <header className="panel-head">
+          <h2 className="lbl">Confluence · {symbol.replace("USDT", "")}</h2>
+          <Tag tone="muted">additional score</Tag>
+        </header>
+        <ConfluencePanel symbol={symbol} macro={macro} read={reads.get(symbol)} vwap={vwap} signals={signals} now={now} />
+      </section>
+      <section className="panel overflow-hidden">
+        <header className="panel-head">
+          <h2 className="lbl">Squeeze history · {symbol}</h2>
+        </header>
+        <SqueezeHistoryPanel symbol={symbol} history={squeezeHistory} now={now} />
+      </section>
+    </div>
+  );
+}
+
+const LOWER_TABS = [
+  { id: "oi", label: "OI & funding" },
+  { id: "squeeze", label: "Squeeze radar" },
+  { id: "liq", label: "Liquidations" },
+] as const;
+
+type LowerTab = (typeof LOWER_TABS)[number]["id"];
+
 const BOTTOM_TABS = [
-  { id: "squeeze", label: "Squeeze history" },
+  { id: "wick", label: "Wick history" },
+  { id: "sqh", label: "Squeeze history" },
+  { id: "liqh", label: "Liquidation history" },
+  { id: "btc", label: "BTCUSDT analysis" },
+  { id: "usdc", label: "USDCUSDT analysis" },
+  { id: "engine", label: "Engine history" },
   { id: "quality", label: "Data quality" },
-  { id: "config", label: "Engine settings" },
-  { id: "trap", label: "BTC trap log" },
-  { id: "docs", label: "Pine & docs" },
+  { id: "config", label: "Engine configuration" },
 ] as const;
 
 type BottomTab = (typeof BOTTOM_TABS)[number]["id"];
@@ -162,7 +227,8 @@ export default function Terminal() {
     statusFailed: chainStatusFailed,
   } = useOnChain();
 
-  const [tab, setTab] = useState<BottomTab>("squeeze");
+  const [tab, setTab] = useState<BottomTab>("wick");
+  const [lower, setLower] = useState<LowerTab>("oi");
 
   const selected = prefs.selected;
   const read = reads.get(selected);
@@ -183,6 +249,7 @@ export default function Terminal() {
 
   const price = read?.depth.mid ?? macro?.price ?? 0;
   const decimals = priceDecimals(price || 1);
+  const change = macro?.changePct;
 
   // Wick markers only pin to bars the chart actually shows.
   const markers = useMemo(() => {
@@ -215,39 +282,50 @@ export default function Terminal() {
     return m;
   }, [vwap]);
 
+  const selectedSignals = useMemo(() => signals.filter((s) => s.symbol === selected).length, [signals, selected]);
+
   return (
-    <div className="flex h-[calc(100vh-3.7rem)] min-h-[560px] flex-col gap-2">
-      {/* ---------- instrument selector + statuses ---------- */}
-      <section className="panel flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1.5 px-3 py-1.5">
-        <div className="flex items-center gap-1">
-          {TRACKED_SYMBOLS.map((symbol) => (
-            <button
-              key={symbol}
-              type="button"
-              onClick={() => select(symbol)}
-              className={cn(
-                "num rounded-[3px] border px-2.5 py-1 text-[11.5px] font-semibold tracking-[0.04em] transition-colors",
-                selected === symbol
-                  ? "border-primary/50 bg-primary/12 text-primary"
-                  : "border-border bg-secondary/40 text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {symbol.replace("USDT", "")}
-              <span className="ml-1.5 text-[9.5px] font-normal opacity-70">
-                {(() => {
-                const p = reads.get(symbol)?.depth.mid;
-                return p ? fmtPrice(p, priceDecimals(p)) : "n/a";
-              })()}
-              </span>
-            </button>
-          ))}
+    <div className="flex h-[calc(100vh-3.7rem)] min-h-[600px] flex-col gap-2">
+      {/* ---------- pair · price · engine stats · status ---------- */}
+      <section className="panel flex shrink-0 flex-wrap items-center gap-x-5 gap-y-1.5 px-3 py-1.5">
+        <div className="flex items-center gap-1.5">
+          {TRACKED_SYMBOLS.map((symbol) => {
+            const p = reads.get(symbol)?.depth.mid;
+            const dec = p ? priceDecimals(p) : 2;
+            const chg = bySymbol.get(symbol)?.changePct;
+            const active = selected === symbol;
+            return (
+              <button
+                key={symbol}
+                type="button"
+                onClick={() => select(symbol)}
+                className={cn(
+                  "num rounded-[4px] border px-3 py-1 text-left transition-colors",
+                  active
+                    ? "border-primary/50 bg-primary/[0.08]"
+                    : "border-border bg-secondary/40 hover:border-muted-foreground/40",
+                )}
+              >
+                <span className={cn("block text-[10px] font-semibold uppercase tracking-[0.1em]", active ? "text-primary" : "text-muted-foreground")}>
+                  {symbol.replace("USDT", "")}
+                  <span className="text-[8.5px] font-normal opacity-60">/USDT</span>
+                </span>
+                <span className={cn("block text-[15px] font-semibold leading-tight", active ? "text-foreground" : "text-foreground/80")}>
+                  {p ? fmtPrice(p, dec) : "n/a"}
+                  <span className={cn("ml-1.5 text-[10.5px]", chg === undefined ? "text-muted-foreground/50" : chg >= 0 ? "text-pos" : "text-neg")}>
+                    {chg === undefined ? "" : fmtSignedPct(chg, 2)}
+                  </span>
+                </span>
+              </button>
+            );
+          })}
         </div>
 
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <Metric label="Armed" value={String(armedCount)} size="sm" tone={armedCount > 0 ? "neg" : "muted"} />
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          <Metric label="Armed gates" value={String(armedCount)} size="sm" tone={armedCount > 0 ? "neg" : "muted"} />
           <Metric label="Wick signals" value={String(signals.length)} size="sm" tone="brand" />
           <Metric label="Alerts new" value={String(alertUnseen)} size="sm" tone={alertUnseen > 0 ? "warn" : "muted"} />
-          <Metric label="Scanned" value={scannedAt ? timeAgo(scannedAt, now) : "—"} size="sm" />
+          <Metric label="Engine scan" value={scannedAt ? timeAgo(scannedAt, now) : "—"} size="sm" />
         </div>
 
         <div className="ml-auto flex flex-wrap items-center gap-1.5">
@@ -267,83 +345,80 @@ export default function Terminal() {
         </div>
       </section>
 
-      {/* ---------- three columns + bottom ---------- */}
+      {/* ---------- three columns + bottom workspace ---------- */}
       <PanelGroup direction="vertical" className="min-h-0 flex-1 gap-0">
-        <RPPanel defaultSize={72} minSize={40}>
+        <RPPanel defaultSize={72} minSize={42}>
           <PanelGroup direction="horizontal" className="min-h-0">
-            {/* LEFT */}
-            <RPPanel defaultSize={23} minSize={14}>
-              <PanelGroup direction="vertical" className="min-h-0">
-                <RPPanel defaultSize={26} minSize={12}>
-                  <section className="panel h-full overflow-auto">
-                    <header className="panel-head">
-                      <h2 className="lbl">Market overview</h2>
-                      <Tag tone="muted">{UNIVERSE_LABEL}</Tag>
-                    </header>
-                    <MarketOverviewPanel
-                      symbols={TRACKED_SYMBOLS}
-                      reads={reads}
-                      macros={macroMap}
-                      vwaps={vwapMap}
-                      selected={selected}
-                      onSelect={select}
-                      now={now}
-                    />
-                  </section>
-                </RPPanel>
-                <Handle className="h-[5px] w-full cursor-row-resize" />
-                <RPPanel defaultSize={40} minSize={16}>
-                  <section className="panel h-full overflow-hidden">
-                    <header className="panel-head">
-                      <h2 className="lbl">Order book · {selected.replace("USDT", "")}</h2>
-                      <Tag tone="muted">20 levels · 100ms</Tag>
-                    </header>
-                    <div className="h-[calc(100%-29px)] overflow-auto">
-                      {read ? (
-                        <DepthTable read={read} decimals={decimals} />
-                      ) : (
-                        <p className="num px-3 py-6 text-center text-[11px] text-muted-foreground/70">
-                          Depth stream connecting…
-                        </p>
-                      )}
-                    </div>
-                  </section>
-                </RPPanel>
-                <Handle className="h-[5px] w-full cursor-row-resize" />
-                <RPPanel defaultSize={34} minSize={14}>
-                  <PanelGroup direction="vertical" className="min-h-0">
-                    <RPPanel defaultSize={50} minSize={12}>
-                      <section className="panel h-full overflow-auto">
-                        <header className="panel-head">
-                          <h2 className="lbl">Liquidity walls</h2>
-                          <Activity className="h-[11px] w-[11px] text-muted-foreground/50" />
-                        </header>
-                        <WallsPanel read={reads.get(selected)} price={price} />
-                      </section>
-                    </RPPanel>
-                    <Handle className="h-[5px] w-full cursor-row-resize" />
-                    <RPPanel defaultSize={50} minSize={12}>
-                      <section className="panel h-full overflow-hidden">
-                        <header className="panel-head">
-                          <h2 className="lbl">Whale tape · {selected.replace("USDT", "")}</h2>
-                          <Tag tone="muted">{read ? `${read.whales.length} prints` : "n/a"}</Tag>
-                        </header>
-                        <div className="h-[calc(100%-29px)] overflow-auto">
-                          {read ? <TradeTape read={read} decimals={decimals} /> : null}
-                        </div>
-                      </section>
-                    </RPPanel>
-                  </PanelGroup>
-                </RPPanel>
-              </PanelGroup>
+            {/* ============ LEFT — MARKET INTELLIGENCE ============ */}
+            <RPPanel defaultSize={17} minSize={13}>
+              <div className="h-full min-h-0 space-y-2 overflow-y-auto pb-1 pr-0.5">
+                <CollapsibleSection id="left-overview" title="Market overview" bodyClassName="p-0">
+                  <MarketOverviewPanel
+                    symbols={TRACKED_SYMBOLS}
+                    reads={reads}
+                    macros={macroMap}
+                    vwaps={vwapMap}
+                    selected={selected}
+                    onSelect={select}
+                    now={now}
+                  />
+                </CollapsibleSection>
+
+                <CollapsibleSection
+                  id="left-book"
+                  title={`Order book · ${selected.replace("USDT", "")}`}
+                  aside={<Tag tone="muted">20 levels</Tag>}
+                  bodyClassName="p-0"
+                >
+                  <div className="h-[320px] overflow-auto">
+                    {read ? (
+                      <DepthTable read={read} decimals={decimals} />
+                    ) : (
+                      <p className="num px-3 py-8 text-center text-[12px] text-muted-foreground/70">Depth stream connecting…</p>
+                    )}
+                  </div>
+                </CollapsibleSection>
+
+                <CollapsibleSection id="left-walls" title="Liquidity walls" bodyClassName="p-0">
+                  <div className="max-h-[280px] overflow-auto">
+                    <WallsPanel read={reads.get(selected)} price={price} />
+                  </div>
+                </CollapsibleSection>
+
+                <CollapsibleSection
+                  id="left-whales"
+                  title={`Whale activity · ${selected.replace("USDT", "")}`}
+                  aside={<Tag tone="muted">{read ? `${read.whales.length} prints` : "n/a"}</Tag>}
+                  bodyClassName="p-0"
+                >
+                  <div className="h-[260px] overflow-auto">
+                    {read ? <TradeTape read={read} decimals={decimals} /> : null}
+                  </div>
+                </CollapsibleSection>
+
+                <CollapsibleSection
+                  id="left-liqs"
+                  title="Liquidation feed"
+                  defaultOpen={false}
+                  bodyClassName="p-0"
+                >
+                  <div className="h-[240px] overflow-auto">
+                    {read ? (
+                      <LiquidationsPane read={read} decimals={decimals} />
+                    ) : (
+                      <p className="num px-3 py-8 text-center text-[12px] text-muted-foreground/70">Forced-order stream connecting…</p>
+                    )}
+                  </div>
+                </CollapsibleSection>
+              </div>
             </RPPanel>
 
             <Handle className="w-[5px] cursor-col-resize" />
 
-            {/* CENTER */}
-            <RPPanel defaultSize={52} minSize={28}>
+            {/* ============ CENTER — MAIN TERMINAL ============ */}
+            <RPPanel defaultSize={58} minSize={30}>
               <PanelGroup direction="vertical" className="min-h-0">
-                <RPPanel defaultSize={62} minSize={25}>
+                <RPPanel defaultSize={70} minSize={30}>
                   <div className="h-full min-h-0">
                     <TradingChart
                       bars={chart.bars}
@@ -358,76 +433,113 @@ export default function Terminal() {
                   </div>
                 </RPPanel>
                 <Handle className="h-[5px] cursor-row-resize" />
-                <RPPanel defaultSize={20} minSize={10}>
-                  <section className="panel h-full overflow-auto">
-                    <header className="panel-head">
-                      <h2 className="lbl">Open interest & funding</h2>
+                <RPPanel defaultSize={30} minSize={12}>
+                  <section className="panel flex h-full min-h-0 flex-col">
+                    <header className="flex shrink-0 items-center gap-1 border-b border-border bg-secondary/40 px-2 py-1">
+                      {LOWER_TABS.map((t) => (
+                        <button
+                          key={t.id}
+                          type="button"
+                          onClick={() => setLower(t.id)}
+                          className={cn(
+                            "num rounded-[3px] px-2.5 py-1 text-[10.5px] font-medium uppercase tracking-[0.09em] transition-colors",
+                            lower === t.id
+                              ? "bg-primary/12 text-primary"
+                              : "text-muted-foreground hover:bg-secondary hover:text-foreground",
+                          )}
+                        >
+                          {t.label}
+                        </button>
+                      ))}
+                      <span className="num ml-auto pr-1 text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
+                        {selected}
+                      </span>
                     </header>
-                    <OiFundingPanel reads={reads} order={TRACKED_SYMBOLS} now={now} />
+                    <div className="min-h-0 flex-1 overflow-auto">
+                      {lower === "oi" ? (
+                        <OiFundingPanel reads={reads} order={TRACKED_SYMBOLS} now={now} />
+                      ) : lower === "squeeze" ? (
+                        <SqueezeRadar symbol={selected} read={read} now={now} />
+                      ) : (
+                        <div className="h-full min-h-0 overflow-auto">
+                          {read ? (
+                            <LiquidationsPane read={read} decimals={decimals} />
+                          ) : (
+                            <p className="num px-3 py-8 text-center text-[12px] text-muted-foreground/70">
+                              Forced-order stream connecting…
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </section>
                 </RPPanel>
-                <Handle className="h-[5px] cursor-row-resize" />
-                <SqueezeLive symbol={selected} read={read} now={now} />
               </PanelGroup>
             </RPPanel>
 
             <Handle className="w-[5px] cursor-col-resize" />
 
-            {/* RIGHT */}
-            <RPPanel defaultSize={25} minSize={16}>
+            {/* ============ RIGHT — SIGNAL CENTER ============ */}
+            <RPPanel defaultSize={25} minSize={17}>
               <PanelGroup direction="vertical" className="min-h-0">
-                <RPPanel defaultSize={34} minSize={14}>
+                {/* Primary module — the wick signal monitor, kept spacious */}
+                <RPPanel defaultSize={52} minSize={22}>
                   <section className="panel flex h-full min-h-0 flex-col">
                     <header className="panel-head">
                       <h2 className="lbl">Wick signal monitor · 1H</h2>
-                      <Tag tone="brand">{signals.filter((s) => s.symbol === selected).length}</Tag>
+                      <Tag tone="brand">{selectedSignals} · {selected.replace("USDT", "")}</Tag>
                     </header>
                     <WickSignalPanel signals={signals} className="min-h-0 flex-1" />
                   </section>
                 </RPPanel>
                 <Handle className="h-[5px] w-full cursor-row-resize" />
-                <RPPanel defaultSize={24} minSize={12}>
-                  <section className="panel flex h-full min-h-0 flex-col">
-                    <header className="panel-head">
-                      <h2 className="lbl">Alert center</h2>
-                      {alertUnseen > 0 ? <Tag tone="warn">{alertUnseen} new</Tag> : null}
-                    </header>
-                    <AlertFeedPanel onSelect={select} />
-                  </section>
-                </RPPanel>
-                <Handle className="h-[5px] w-full cursor-row-resize" />
-                <RPPanel defaultSize={24} minSize={12}>
-                  <div className="h-full min-h-0 overflow-auto">
-                    <ExhaustionPanel
-                      read={macro}
-                      symbol={selected}
-                      pinned={prefs.pinned.includes(selected)}
-                      onTogglePin={onTogglePin}
-                      blocked={status.market === "blocked"}
-                      paused={prefs.paused}
-                      onChain={focusJob}
-                      now={chainNow}
-                      onScanNow={onScanNow}
-                      onRescan={chainRescan}
-                    />
+                <RPPanel defaultSize={48} minSize={16}>
+                  <div className="h-full min-h-0 space-y-2 overflow-y-auto pb-1 pr-0.5">
+                    <CollapsibleSection id="right-exhaustion" title={`Exhaustion signals · ${selected.replace("USDT", "")}`} bodyClassName="p-0">
+                      <ExhaustionPanel
+                        read={macro}
+                        symbol={selected}
+                        pinned={prefs.pinned.includes(selected)}
+                        onTogglePin={onTogglePin}
+                        blocked={status.market === "blocked"}
+                        paused={prefs.paused}
+                        onChain={focusJob}
+                        now={chainNow}
+                        onScanNow={onScanNow}
+                        onRescan={chainRescan}
+                      />
+                    </CollapsibleSection>
+
+                    <CollapsibleSection
+                      id="right-alerts"
+                      title="Squeeze & liquidity alerts"
+                      aside={alertUnseen > 0 ? <Tag tone="warn">{alertUnseen} new</Tag> : undefined}
+                      defaultOpen={false}
+                      bodyClassName="p-0"
+                    >
+                      <div className="h-[300px] overflow-auto">
+                        <AlertFeedPanel onSelect={select} />
+                      </div>
+                    </CollapsibleSection>
+
+                    <CollapsibleSection
+                      id="right-confluence"
+                      title={`Confluence · ${selected.replace("USDT", "")}`}
+                      aside={<Tag tone="muted">additional score</Tag>}
+                      bodyClassName="p-0"
+                    >
+                      <div className="max-h-[340px] overflow-auto">
+                        <ConfluencePanel
+                          symbol={selected}
+                          macro={macro}
+                          read={read}
+                          vwap={vwap.get(selected)}
+                          signals={signals}
+                          now={now}
+                        />
+                      </div>
+                    </CollapsibleSection>
                   </div>
-                </RPPanel>
-                <Handle className="h-[5px] w-full cursor-row-resize" />
-                <RPPanel defaultSize={18} minSize={10}>
-                  <section className="panel flex h-full min-h-0 flex-col">
-                    <header className="panel-head">
-                      <h2 className="lbl">Confluence · {selected.replace("USDT", "")}</h2>
-                      <Tag tone="muted">additional score</Tag>
-                    </header>
-                    <ConfluencePanel
-                      symbol={selected}
-                      macro={macro}
-                      read={read}
-                      vwap={vwap.get(selected)}
-                      signals={signals}
-                      now={now}
-                    />
-                  </section>
                 </RPPanel>
               </PanelGroup>
             </RPPanel>
@@ -436,17 +548,17 @@ export default function Terminal() {
 
         <Handle className="h-[5px] w-full cursor-row-resize" />
 
-        {/* BOTTOM */}
+        {/* ============ BOTTOM — HISTORICAL ANALYTICS ============ */}
         <RPPanel defaultSize={28} minSize={10}>
           <section className="panel flex h-full min-h-0 flex-col">
-            <header className="flex shrink-0 items-center gap-1 border-b border-border bg-secondary/40 px-2 py-1">
+            <header className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border bg-secondary/40 px-2 py-1">
               {BOTTOM_TABS.map((t) => (
                 <button
                   key={t.id}
                   type="button"
                   onClick={() => setTab(t.id)}
                   className={cn(
-                    "num rounded-[3px] px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.1em] transition-colors",
+                    "num shrink-0 rounded-[3px] px-2.5 py-1 text-[10.5px] font-medium uppercase tracking-[0.09em] transition-colors",
                     tab === t.id
                       ? "bg-primary/12 text-primary"
                       : "text-muted-foreground hover:bg-secondary hover:text-foreground",
@@ -457,7 +569,11 @@ export default function Terminal() {
               ))}
             </header>
             <div className="min-h-0 flex-1 overflow-auto">
-              {tab === "squeeze" ? (
+              {tab === "wick" ? (
+                <div className="h-full min-h-[320px]">
+                  <WickSignalPanel signals={signals} className="h-full" />
+                </div>
+              ) : tab === "sqh" ? (
                 <div className="grid gap-px bg-line-soft xl:grid-cols-2">
                   {TRACKED_SYMBOLS.map((symbol) => (
                     <SqueezeHistoryPanel
@@ -468,18 +584,66 @@ export default function Terminal() {
                     />
                   ))}
                 </div>
-              ) : tab === "quality" ? (
-                <DataQualityPanel reads={reads} order={TRACKED_SYMBOLS} now={now} />
-              ) : tab === "config" ? (
-                <div className="p-2">
-                  <EngineConfigPanel />
+              ) : tab === "liqh" ? (
+                <div className="grid gap-px bg-line-soft xl:grid-cols-2">
+                  {TRACKED_SYMBOLS.map((symbol) => {
+                    const r = reads.get(symbol);
+                    return (
+                      <section key={symbol} className="bg-card">
+                        <header className="panel-head">
+                          <h2 className="lbl">Liquidations · {symbol}</h2>
+                          <Tag tone="muted">trailing window</Tag>
+                        </header>
+                        <div className="h-[300px] overflow-auto">
+                          {r ? (
+                            <LiquidationsPane read={r} decimals={priceDecimals(r.depth.mid ?? 1)} />
+                          ) : (
+                            <p className="num px-3 py-8 text-center text-[12px] text-muted-foreground/70">n/a</p>
+                          )}
+                        </div>
+                      </section>
+                    );
+                  })}
                 </div>
-              ) : tab === "trap" ? (
+              ) : tab === "btc" ? (
+                <SymbolAnalysis
+                  symbol="BTCUSDT"
+                  reads={reads}
+                  macros={macroMap}
+                  vwaps={vwapMap}
+                  selected={selected}
+                  onSelect={select}
+                  now={now}
+                  macro={bySymbol.get("BTCUSDT")}
+                  vwap={vwap.get("BTCUSDT")}
+                  signals={signals}
+                  squeezeHistory={reads.get("BTCUSDT")?.squeezeHistory ?? []}
+                />
+              ) : tab === "usdc" ? (
+                <SymbolAnalysis
+                  symbol="USDCUSDT"
+                  reads={reads}
+                  macros={macroMap}
+                  vwaps={vwapMap}
+                  selected={selected}
+                  onSelect={select}
+                  now={now}
+                  macro={bySymbol.get("USDCUSDT")}
+                  vwap={vwap.get("USDCUSDT")}
+                  signals={signals}
+                  squeezeHistory={reads.get("USDCUSDT")?.squeezeHistory ?? []}
+                />
+              ) : tab === "engine" ? (
                 <div className="p-2">
                   <BtcTrapPanel />
                 </div>
+              ) : tab === "quality" ? (
+                <DataQualityPanel reads={reads} order={TRACKED_SYMBOLS} now={now} />
               ) : (
-                <DocsPanel />
+                <div className="space-y-2 p-2">
+                  <EngineConfigPanel />
+                  <DocsPanel />
+                </div>
               )}
             </div>
           </section>

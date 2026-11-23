@@ -184,7 +184,7 @@
   /* Small uppercase field/column label. */
   .lbl {
     font-family: "IBM Plex Mono", ui-monospace, monospace;
-    @apply text-[9.5px] font-medium uppercase tracking-[0.14em] text-muted-foreground;
+    @apply text-[10px] font-medium uppercase tracking-[0.13em] text-muted-foreground;
   }
 
   .panel {
@@ -197,7 +197,7 @@
   }
 
   .panel-head {
-    @apply flex h-8 items-center justify-between gap-3 border-b border-border bg-secondary/50 px-3;
+    @apply flex h-9 items-center justify-between gap-3 border-b border-border bg-secondary/50 px-3;
   }
 
   /* Terminal input: flat, mono, amber focus. */
@@ -222,17 +222,17 @@
 
   /* Dense data table shared across the terminal. */
   .grid-table {
-    @apply w-full border-collapse text-[12px];
+    @apply w-full border-collapse text-[12.5px];
     font-family: "IBM Plex Mono", ui-monospace, monospace;
     font-variant-numeric: tabular-nums;
   }
 
   .grid-table thead th {
-    @apply h-7 whitespace-nowrap border-b border-border bg-secondary/50 px-2.5 text-left text-[9.5px] font-medium uppercase tracking-[0.12em] text-muted-foreground;
+    @apply h-8 whitespace-nowrap border-b border-border bg-secondary/50 px-2.5 text-left text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground;
   }
 
   .grid-table tbody td {
-    @apply h-[26px] whitespace-nowrap border-b border-line-soft px-2.5 text-foreground;
+    @apply h-[30px] whitespace-nowrap border-b border-line-soft px-2.5 text-foreground;
   }
 
   .grid-table tbody td:last-child {

@@ -70,17 +70,17 @@ export const MarketOverviewPanel = memo(function MarketOverviewPanel({
               {stale ? <Tag tone="warn">stale</Tag> : null}
               {macro && gates > 0 ? <Tag tone={gates >= 3 ? "warn" : "muted"}>{gates}/4</Tag> : null}
             </div>
-            <div className="mt-1.5 grid grid-cols-4 gap-2">
-              <Metric label="24h hi" value={macro?.high24h ? fmtPrice(macro.high24h, dec) : "n/a"} size="sm" tone="muted" />
-              <Metric label="24h lo" value={macro?.low24h ? fmtPrice(macro.low24h, dec) : "n/a"} size="sm" tone="muted" />
+            <div className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-2">
+              <Metric label="24h high" value={macro?.high24h ? fmtPrice(macro.high24h, dec) : "n/a"} size="sm" tone="muted" />
+              <Metric label="24h low" value={macro?.low24h ? fmtPrice(macro.low24h, dec) : "n/a"} size="sm" tone="muted" />
               <Metric
-                label="VWAP dist"
+                label="VWAP distance"
                 value={vwap?.deviation === undefined ? "n/a" : fmtSignedPct(vwap.deviation, 2)}
                 size="sm"
-                tone={(vwap?.deviation ?? 0) >= 0 ? "neg" : "pos"}
+                tone={vwap?.deviation === undefined ? "muted" : vwap.deviation >= 0 ? "neg" : "pos"}
               />
               <Metric
-                label="Turnover"
+                label="Turnover 24h"
                 value={macro?.quoteVolume ? fmtCompactUsd(macro.quoteVolume) : "n/a"}
                 size="sm"
                 tone="muted"

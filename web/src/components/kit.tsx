@@ -1,3 +1,4 @@
+import { ChevronDown } from "lucide-react";
 import { forwardRef, useCallback, useId, useMemo, useState, type ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
@@ -65,13 +66,88 @@ export function Metric({
   size?: "sm" | "md" | "lg";
   className?: string;
 }) {
-  const sizing = size === "lg" ? "text-[19px]" : size === "sm" ? "text-[12.5px]" : "text-[15px]";
+  const sizing = size === "lg" ? "text-[21px]" : size === "sm" ? "text-[13px]" : "text-[16px]";
   return (
     <div className={cn("min-w-0", className)}>
       <div className="lbl truncate">{label}</div>
       <div className={cn("num mt-1 font-semibold leading-none", sizing, TONE[tone])}>{value}</div>
-      {sub ? <div className="num mt-1 text-[10.5px] leading-none text-muted-foreground">{sub}</div> : null}
+      {sub ? <div className="num mt-1 text-[11px] leading-none text-muted-foreground">{sub}</div> : null}
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* CollapsibleSection — a panel whose body folds away                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A standard panel with a clickable header that collapses its body. The
+ * open/closed choice persists per section id, so a terminal trimmed by the
+ * user stays trimmed across reloads. Collapsing only changes what is SHOWN —
+ * the data behind every section keeps running.
+ */
+export function CollapsibleSection({
+  id,
+  title,
+  aside,
+  children,
+  defaultOpen = true,
+  bodyClassName = "p-3",
+  className,
+}: {
+  /** Persisted-state key; must be unique within the app. */
+  id: string;
+  title: string;
+  aside?: ReactNode;
+  children: ReactNode;
+  defaultOpen?: boolean;
+  /** Body padding classes; pass "p-0" for flush tables. */
+  bodyClassName?: string;
+  className?: string;
+}) {
+  const storeKey = `nova-section-${id}`;
+  const [open, setOpen] = useState<boolean>(() => {
+    try {
+      const v = localStorage.getItem(storeKey);
+      return v === null ? defaultOpen : v === "1";
+    } catch {
+      return defaultOpen;
+    }
+  });
+
+  const toggle = useCallback(() => {
+    setOpen((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(storeKey, next ? "1" : "0");
+      } catch {
+        /* private mode — the section still folds for this session */
+      }
+      return next;
+    });
+  }, [storeKey]);
+
+  return (
+    <section className={cn("panel", className)}>
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={open}
+        className="panel-head w-full cursor-pointer select-none transition-colors hover:bg-secondary/70"
+      >
+        <span className="flex min-w-0 items-center gap-1.5">
+          <ChevronDown
+            className={cn(
+              "h-3.5 w-3.5 shrink-0 text-muted-foreground/60 transition-transform duration-150",
+              !open && "-rotate-90",
+            )}
+          />
+          <h2 className="lbl truncate">{title}</h2>
+        </span>
+        {aside ? <span className="flex shrink-0 items-center gap-1.5" onClick={(e) => e.stopPropagation()}>{aside}</span> : null}
+      </button>
+      {open ? <div className={bodyClassName}>{children}</div> : null}
+    </section>
   );
 }
 
@@ -93,12 +169,12 @@ export function Row({
   return (
     <div
       className={cn(
-        "flex h-[27px] items-center justify-between gap-4 border-b border-line-soft last:border-b-0",
+        "flex h-[31px] items-center justify-between gap-4 border-b border-line-soft last:border-b-0",
         strong && "bg-secondary/25",
       )}
     >
       <span className={cn("lbl", strong && "text-foreground")}>{label}</span>
-      <span className={cn("num text-[12.5px]", strong ? "font-semibold" : "font-medium", TONE[tone])}>{value}</span>
+      <span className={cn("num text-[13px]", strong ? "font-semibold" : "font-medium", TONE[tone])}>{value}</span>
     </div>
   );
 }
