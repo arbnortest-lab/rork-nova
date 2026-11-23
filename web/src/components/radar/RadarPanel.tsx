@@ -1,5 +1,5 @@
-import { Lock, LockOpen, Radar, Zap } from "lucide-react";
-import { memo, useMemo, useState } from "react";
+import { Lock, LockOpen, Maximize2, Minimize2, Radar, Zap } from "lucide-react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button, Metric, Segmented, Tag } from "@/components/kit";
 import { fmtClock, fmtCompactUsd, fmtPrice, fmtQty, fmtSignedPct, priceDecimals, timeAgo } from "@/lib/format";
@@ -391,6 +391,21 @@ export const RadarPanel = memo(function RadarPanel({
   const price = read?.depth.mid ?? read?.trades[0]?.price ?? macro?.price ?? chart.bars[chart.bars.length - 1]?.close ?? 0;
   const decimals = priceDecimals(price || 1);
 
+  const chartBoxRef = useRef<HTMLDivElement | null>(null);
+  const [chartFull, setChartFull] = useState(false);
+  useEffect(() => {
+    const onFsChange = () => setChartFull(document.fullscreenElement === chartBoxRef.current);
+    document.addEventListener("fullscreenchange", onFsChange);
+    return () => document.removeEventListener("fullscreenchange", onFsChange);
+  }, []);
+  const toggleChartFull = () => {
+    const el = chartBoxRef.current;
+    if (!el) return;
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void el.requestFullscreen();
+  };
+  const chartHeight = chartFull ? Math.max(360, Math.round(window.innerHeight) - 64) : 320;
+
   const lines = useMemo<PriceLineSpec[]>(() => {
     const out: PriceLineSpec[] = [];
     if (macro?.high24h) out.push({ id: "h24", price: macro.high24h, color: CHART_COLORS.down, title: "24H HIGH", style: "dashed" });
@@ -534,7 +549,7 @@ export const RadarPanel = memo(function RadarPanel({
           </div>
 
           {/* chart */}
-          <div className="relative border-b border-border">
+          <div ref={chartBoxRef} className={cn("relative border-b border-border", chartFull && "bg-background p-2")}>
             <div className="pointer-events-none absolute left-3 top-2 z-10 flex items-center gap-2">
               <span className="num text-[10.5px] font-semibold uppercase tracking-[0.1em] text-foreground">
                 {symbol} · {interval}
@@ -543,7 +558,18 @@ export const RadarPanel = memo(function RadarPanel({
                 {chart.loading ? "loading history" : chart.error ? `history failed: ${chart.error}` : `${chart.bars.length} bars · live`}
               </span>
             </div>
-            <RadarChart bars={chart.bars} seriesKey={`${chart.symbol}:${chart.interval}`} decimals={decimals} lines={lines} />
+            <button
+              type="button"
+              onClick={toggleChartFull}
+              title={chartFull ? "Exit fullscreen (Esc)" : "Fullscreen chart"}
+              className={cn(
+                "pointer-events-auto absolute right-2 top-1.5 z-10 rounded-[3px] border border-line-soft bg-background/70 p-1.5 text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary",
+                chartFull && "left-auto right-3 top-3",
+              )}
+            >
+              {chartFull ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
+            </button>
+            <RadarChart bars={chart.bars} seriesKey={`${chart.symbol}:${chart.interval}`} decimals={decimals} lines={lines} height={chartHeight} />
             <div className="num flex flex-wrap items-center gap-x-3 gap-y-1 px-3 pb-2 text-[9.5px] uppercase tracking-[0.08em] text-muted-foreground">
               <span>
                 <span className="text-neg">— —</span> 24h high
