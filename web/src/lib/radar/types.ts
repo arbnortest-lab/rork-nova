@@ -132,13 +132,16 @@ export interface ChartBar {
   closed: boolean;
 }
 
-export type ChartInterval = "1m" | "5m" | "15m" | "1h";
+export type ChartInterval = "1m" | "5m" | "15m" | "30m" | "1h" | "4h" | "1d";
 
 export const CHART_INTERVALS: { value: ChartInterval; label: string; ms: number }[] = [
   { value: "1m", label: "1m", ms: 60_000 },
   { value: "5m", label: "5m", ms: 5 * 60_000 },
   { value: "15m", label: "15m", ms: 15 * 60_000 },
-  { value: "1h", label: "1h", ms: 60 * 60_000 },
+  { value: "30m", label: "30m", ms: 30 * 60_000 },
+  { value: "1h", label: "1H", ms: 60 * 60_000 },
+  { value: "4h", label: "4H", ms: 4 * 60 * 60_000 },
+  { value: "1d", label: "1D", ms: 24 * 60 * 60_000 },
 ];
 
 /** Everything the radar shows for one attached contract. */

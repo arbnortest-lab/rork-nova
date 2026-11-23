@@ -1,6 +1,6 @@
 /**
- * The universe rule: Bitcoin, plus altcoins priced strictly inside
- * $0.001–$7.00. Everything else stays out of the scanner.
+ * V2 universe rule: exactly two instruments — BTCUSDT and USDCUSDT.
+ * The legacy $0.001–$7.00 band helpers remain and are still exercised.
  */
 
 import { describe, expect, it } from "vitest";
@@ -9,13 +9,17 @@ import {
   BITCOIN_SYMBOL,
   PRICE_BAND_MAX,
   PRICE_BAND_MIN,
+  TRACKED_SYMBOLS,
+  USDC_SYMBOL,
+  UNIVERSE_LABEL,
   bandPosition,
   inPriceBand,
   isTracked,
+  isTrackedSymbol,
   pruneUntracked,
 } from "@/lib/wick/universe";
 
-describe("price band", () => {
+describe("price band (legacy helpers, still active)", () => {
   it("is strictly exclusive at both bounds", () => {
     expect(inPriceBand(PRICE_BAND_MIN)).toBe(false);
     expect(inPriceBand(PRICE_BAND_MAX)).toBe(false);
@@ -42,27 +46,33 @@ describe("price band", () => {
   });
 });
 
-describe("isTracked", () => {
-  it("always keeps Bitcoin, whatever it costs", () => {
-    expect(isTracked(BITCOIN_SYMBOL, 120_000)).toBe(true);
-    expect(isTracked(BITCOIN_SYMBOL, 0)).toBe(true);
+describe("isTracked / isTrackedSymbol (V2 fixed list)", () => {
+  it("tracks exactly BTCUSDT and USDCUSDT", () => {
+    expect(TRACKED_SYMBOLS).toEqual([BITCOIN_SYMBOL, USDC_SYMBOL]);
+    expect(UNIVERSE_LABEL).toBe("BTCUSDT · USDCUSDT");
   });
 
-  it("keeps altcoins only inside the band", () => {
-    expect(isTracked("DOGEUSDT", 0.21)).toBe(true);
-    expect(isTracked("1000PEPEUSDT", 0.0091)).toBe(true);
-    expect(isTracked("XRPUSDT", 2.9)).toBe(true);
+  it("accepts the two instruments at any price — the band no longer decides membership", () => {
+    expect(isTracked("BTCUSDT", 120_000)).toBe(true);
+    expect(isTracked("USDCUSDT", 1.0)).toBe(true);
+    expect(isTracked("USDCUSDT", 0)).toBe(true);
+    expect(isTrackedSymbol("BTCUSDT")).toBe(true);
+    expect(isTrackedSymbol("USDCUSDT")).toBe(true);
+  });
+
+  it("matches case-insensitively", () => {
+    expect(isTrackedSymbol("btcusdt")).toBe(true);
+    expect(isTrackedSymbol("BtcUsDt")).toBe(true);
+    expect(isTrackedSymbol("usdcusdt")).toBe(true);
+  });
+
+  it("rejects everything else", () => {
+    expect(isTrackedSymbol("ETHUSDT")).toBe(false);
+    expect(isTrackedSymbol("SOLUSDT")).toBe(false);
+    expect(isTrackedSymbol("DOGEUSDT")).toBe(false);
+    expect(isTrackedSymbol("")).toBe(false);
     expect(isTracked("ETHUSDT", 4_210)).toBe(false);
-    expect(isTracked("SOLUSDT", 180)).toBe(false);
-    expect(isTracked("ADAUSDT", 7)).toBe(false);
-    expect(isTracked("ADAUSDT", 7.0001)).toBe(false);
-    expect(isTracked("ADAUSDT", 6.98)).toBe(true);
-  });
-
-  it("drops a contract the moment it crosses out, and takes it back when it returns", () => {
-    expect(isTracked("LINKUSDT", 6.99)).toBe(true);
-    expect(isTracked("LINKUSDT", 7.02)).toBe(false);
-    expect(isTracked("LINKUSDT", 6.97)).toBe(true);
+    expect(isTracked("DOGEUSDT", 0.21)).toBe(false);
   });
 });
 
@@ -70,16 +80,17 @@ describe("pruneUntracked", () => {
   const stored = [
     { id: "a", symbol: "ETHUSDT", price: 4_100 },
     { id: "b", symbol: "BTCUSDT", price: 118_000 },
-    { id: "c", symbol: "DOGEUSDT", price: 0.19 },
+    { id: "c", symbol: "USDCUSDT", price: 1.0 },
     { id: "d", symbol: "SOLUSDT", price: 0 },
     { id: "e", symbol: "BNBUSDT", price: 900 },
   ];
 
-  it("removes records priced outside the band and keeps the rest", () => {
+  it("removes records on untracked contracts and keeps the two instruments", () => {
     expect(pruneUntracked(stored).map((x) => x.id)).toEqual(["b", "c", "d"]);
   });
 
   it("keeps unpriced records rather than guessing", () => {
+    expect(pruneUntracked([{ symbol: "BTCUSDT", price: 0 }])).toHaveLength(1);
     expect(pruneUntracked([{ symbol: "ETHUSDT", price: 0 }])).toHaveLength(1);
   });
 
