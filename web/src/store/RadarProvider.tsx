@@ -25,7 +25,6 @@ import {
 } from "@/lib/radar/micro";
 import { fetchChartBars, fetchOiHistory, fetchOiLive } from "@/lib/radar/rest";
 import { klineStream, LIQUIDATION_STREAM, microStreams, RadarStream } from "@/lib/radar/stream";
-import { CHART_INTERVALS } from "@/lib/radar/types";
 import type {
   ChartBar,
   ChartInterval,
@@ -147,7 +146,8 @@ const RadarContext = createContext<RadarValue | null>(null);
 function sanitizePrefs(raw: unknown): RadarPrefs {
   if (typeof raw !== "object" || raw === null) return { ...DEFAULT_PREFS };
   const r = raw as Partial<RadarPrefs>;
-  const interval: ChartInterval = CHART_INTERVALS.some((i) => i.value === r.interval) ? (r.interval as ChartInterval) : "5m";
+  const interval: ChartInterval =
+    r.interval === "1m" || r.interval === "5m" || r.interval === "15m" || r.interval === "1h" ? r.interval : "5m";
   return {
     enabled: typeof r.enabled === "boolean" ? r.enabled : true,
     interval,

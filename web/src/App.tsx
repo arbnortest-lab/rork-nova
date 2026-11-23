@@ -4,12 +4,9 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Shell } from "@/components/Shell";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { ThemeProvider, useTheme } from "@/lib/theme";
 import { AccountProvider } from "@/store/AccountProvider";
-import { AlertCenterProvider } from "@/store/AlertCenterProvider";
 import { AuthProvider, useAuth } from "@/store/AuthProvider";
 import { BtcTrapProvider } from "@/store/BtcTrapProvider";
-import { InstrumentsProvider } from "@/store/InstrumentsProvider";
 import { JournalProvider } from "@/store/JournalProvider";
 import { OnChainProvider } from "@/store/OnChainProvider";
 import { RadarProvider } from "@/store/RadarProvider";
@@ -19,19 +16,13 @@ import Journal from "./pages/Journal";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
 import Settings from "./pages/Settings";
-import Terminal from "./pages/Terminal";
+import Wick from "./pages/Wick";
 
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: { retry: 1, refetchOnWindowFocus: false },
   },
 });
-
-/** The toaster follows the terminal's theme instead of a hard-coded one. */
-function ThemedToaster() {
-  const { theme } = useTheme();
-  return <Toaster position="bottom-right" theme={theme} richColors closeButton />;
-}
 
 function BootScreen() {
   return (
@@ -60,19 +51,15 @@ function Gate() {
           <OnChainProvider>
             <BtcTrapProvider>
               <RadarProvider>
-                <InstrumentsProvider>
-                  <AlertCenterProvider>
-                    <Shell>
-                      <Routes>
-                        <Route path="/" element={<Terminal />} />
-                        <Route path="/pnl" element={<Journal />} />
-                        <Route path="/settings" element={<Settings />} />
-                        <Route path="/login" element={<Navigate to="/" replace />} />
-                        <Route path="*" element={<NotFound />} />
-                      </Routes>
-                    </Shell>
-                  </AlertCenterProvider>
-                </InstrumentsProvider>
+                <Shell>
+                  <Routes>
+                    <Route path="/" element={<Wick />} />
+                    <Route path="/pnl" element={<Journal />} />
+                    <Route path="/settings" element={<Settings />} />
+                    <Route path="/login" element={<Navigate to="/" replace />} />
+                    <Route path="*" element={<NotFound />} />
+                  </Routes>
+                </Shell>
               </RadarProvider>
             </BtcTrapProvider>
           </OnChainProvider>
@@ -84,16 +71,14 @@ function Gate() {
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
-    <ThemeProvider>
-      <AuthProvider>
-        <TooltipProvider delayDuration={200}>
-          <ThemedToaster />
-          <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-            <Gate />
-          </BrowserRouter>
-        </TooltipProvider>
-      </AuthProvider>
-    </ThemeProvider>
+    <AuthProvider>
+      <TooltipProvider delayDuration={200}>
+        <Toaster position="bottom-right" theme="dark" richColors closeButton />
+        <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+          <Gate />
+        </BrowserRouter>
+      </TooltipProvider>
+    </AuthProvider>
   </QueryClientProvider>
 );
 

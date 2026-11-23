@@ -1,14 +1,13 @@
-import { LogOut, Moon, Sun } from "lucide-react";
+import { LogOut } from "lucide-react";
 import type { ReactNode } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 
 import { cn } from "@/lib/utils";
-import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/store/AuthProvider";
 import { useWick } from "@/store/WickProvider";
 
 const NAV = [
-  { to: "/", label: "Terminal" },
+  { to: "/", label: "Wick" },
   { to: "/pnl", label: "P&L" },
   { to: "/settings", label: "Config" },
 ] as const;
@@ -18,12 +17,11 @@ export function Shell({ children }: { children: ReactNode }) {
   const { session, signOut } = useAuth();
   const { pathname } = useLocation();
   const { unseen, status, prefs, armedCount } = useWick();
-  const { theme, toggle } = useTheme();
 
   return (
-    <div className="flex min-h-screen flex-col bg-background scanlines">
+    <div className="min-h-screen bg-background scanlines">
       <header className="sticky top-0 z-30 border-b border-border bg-background/95 backdrop-blur">
-        <div className="flex h-10 items-center gap-5 px-3">
+        <div className="mx-auto flex h-10 max-w-[1440px] items-center gap-5 px-4">
           <NavLink to="/" className="flex shrink-0 items-center gap-2">
             <span
               className={cn(
@@ -39,10 +37,10 @@ export function Shell({ children }: { children: ReactNode }) {
           <nav className="flex items-center gap-px">
             {NAV.map(({ to, label }) => {
               const active = to === "/" ? pathname === "/" : pathname.startsWith(to);
-              const isTerminal = to === "/";
-              const badge = isTerminal ? unseen : 0;
-              const live = isTerminal && !prefs.paused && status.market !== "idle";
-              const degradedDot = isTerminal && status.market !== "open";
+              const isWick = to === "/";
+              const badge = isWick ? unseen : 0;
+              const live = isWick && !prefs.paused && status.market !== "idle";
+              const degradedDot = isWick && status.market !== "open";
               return (
                 <NavLink
                   key={to}
@@ -84,15 +82,6 @@ export function Shell({ children }: { children: ReactNode }) {
             </span>
             <button
               type="button"
-              onClick={toggle}
-              aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
-              title={theme === "dark" ? "Light theme" : "Dark theme"}
-              className="grid h-7 w-7 place-items-center rounded-[3px] text-muted-foreground transition-colors hover:bg-secondary hover:text-primary"
-            >
-              {theme === "dark" ? <Sun className="h-[14px] w-[14px]" /> : <Moon className="h-[14px] w-[14px]" />}
-            </button>
-            <button
-              type="button"
               onClick={signOut}
               aria-label="Sign out"
               className="grid h-7 w-7 place-items-center rounded-[3px] text-muted-foreground transition-colors hover:bg-secondary hover:text-neg"
@@ -103,15 +92,7 @@ export function Shell({ children }: { children: ReactNode }) {
         </div>
       </header>
 
-      {/* The terminal uses the full width; other pages centre at 1440. */}
-      <main
-        className={cn(
-          "w-full flex-1 px-3 py-2",
-          pathname === "/" ? "" : "mx-auto max-w-[1440px] py-4",
-        )}
-      >
-        {children}
-      </main>
+      <main className="mx-auto w-full max-w-[1440px] px-4 py-4">{children}</main>
     </div>
   );
 }

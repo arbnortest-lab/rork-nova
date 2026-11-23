@@ -99,7 +99,7 @@ const DepthLine = memo(function DepthLine({
   );
 });
 
-export const DepthTable = memo(function DepthTable({ read, decimals }: { read: RadarRead; decimals: number }) {
+const DepthTable = memo(function DepthTable({ read, decimals }: { read: RadarRead; decimals: number }) {
   const { depth } = read;
   const maxTotal = Math.max(depth.bids[depth.bids.length - 1]?.total ?? 0, depth.asks[depth.asks.length - 1]?.total ?? 0);
   const asks = useMemo(() => depth.asks.slice().reverse(), [depth.asks]);
@@ -212,7 +212,7 @@ const TradeLine = memo(function TradeLine({ t, decimals, whaleAt }: { t: AggTrad
   );
 });
 
-export const TradeTape = memo(function TradeTape({ read, decimals }: { read: RadarRead; decimals: number }) {
+const TradeTape = memo(function TradeTape({ read, decimals }: { read: RadarRead; decimals: number }) {
   const [mode, setMode] = useState<"all" | "whales">("all");
   const rows = mode === "whales" ? read.whales : read.trades;
   const flowTone =
@@ -304,7 +304,7 @@ const LiqLine = memo(function LiqLine({ l, decimals }: { l: LiquidationEvent; de
   );
 });
 
-export const LiquidationsPane = memo(function LiquidationsPane({ read, decimals }: { read: RadarRead; decimals: number }) {
+const LiquidationsPane = memo(function LiquidationsPane({ read, decimals }: { read: RadarRead; decimals: number }) {
   return (
     <div className="flex min-h-0 flex-col">
       <div className="flex items-center justify-between gap-2 border-b border-line-soft px-2 py-1.5">
