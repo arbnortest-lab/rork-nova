@@ -19,7 +19,7 @@ import {
   VolumeX,
   X,
 } from "lucide-react";
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 
 import { BtcTrapPanel } from "@/components/BtcTrapPanel";
 import { Button, Metric, Panel, Segmented, Tag } from "@/components/kit";
@@ -27,6 +27,7 @@ import { OnChainBadge, OnChainDetail } from "@/components/OnChainBadge";
 import { ConfluenceMatrix } from "@/components/radar/ConfluenceMatrix";
 import { MiniImbalance, MiniSqueeze } from "@/components/radar/gauges";
 import { RadarPanel } from "@/components/radar/RadarPanel";
+import { wickMonitor } from "@/lib/radar/wickMonitor";
 import { Input } from "@/components/ui/input";
 import { fmtClock, fmtCompactUsd, fmtPrice, fmtSignedPct, timeAgo } from "@/lib/format";
 import {
@@ -603,6 +604,14 @@ export default function Wick() {
     const pool = q ? reads.filter((r) => r.symbol.includes(q)) : reads;
     return pool.slice(0, 14);
   }, [reads, query]);
+
+  // Independent lower-wick monitor: feed it the tracked symbols and let it
+  // sweep 15m/1h/4h closes on its own. Purely additive — no engine coupling.
+  useEffect(() => {
+    wickMonitor.setSymbols(reads.map((r) => r.symbol));
+    wickMonitor.start();
+    return () => wickMonitor.stop();
+  }, [reads]);
 
   const near = useMemo(() => reads.filter((r) => r.passedCount >= 3 && !r.armed).length, [reads]);
 

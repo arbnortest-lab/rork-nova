@@ -595,7 +595,7 @@ export const RadarPanel = memo(function RadarPanel({
           </div>
 
           {/* bullish lower-wick signals — additive, reads closed candles only */}
-          <LowerWickSignals chart={chart} />
+          <LowerWickSignals />
 
           <p className="num border-t border-line-soft px-3 py-2 text-[10px] leading-[1.5] text-muted-foreground">
             Pure signal radar — no auto-trading. Streams attached {timeAgo(read.attachedAt, now)}; they close two minutes after

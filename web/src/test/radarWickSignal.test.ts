@@ -1,103 +1,150 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ChartBar } from "@/lib/radar/types";
-import {
-  intervalMs,
-  lowerWickSignal,
-  newestClosedTime,
-  scanClosedBars,
-} from "@/lib/radar/wickSignal";
+import { wickMonitor, monitorIntervalMs } from "@/lib/radar/wickMonitor";
+import { lowerWickSignal, wickShape } from "@/lib/radar/wickSignal";
 
-function bar(over: Partial<ChartBar> = {}): ChartBar {
-  return {
-    time: 1_700_000_000_000,
-    open: 100,
-    high: 101,
-    low: 90,
-    close: 100.5,
-    volume: 1,
-    quoteVolume: 100,
-    closed: true,
-    ...over,
-  };
+/** The reference candle at any scale: body 1, tail 4.5, upper 0.3. */
+function reference(scale: number) {
+  const body = 1 * scale;
+  const tail = 4.5 * scale;
+  const upper = 0.3 * scale;
+  const close = 100 * scale;
+  return { open: close - body, high: close + upper, low: close - body - tail, close };
 }
 
-describe("lowerWickSignal", () => {
-  it("accepts the reference-shaped candle: green, tail ≈ 78% of range", () => {
-    // open 100, close 100.5, high 101, low 90 → body 0.5, tail 10, range 11
-    const s = lowerWickSignal(bar(), "BTCUSDT", "1m");
+describe("wickShape — the reference structure at any size", () => {
+  it("accepts the reference candle, large or small", () => {
+    for (const scale of [1, 0.01, 250]) {
+      const r = reference(scale);
+      expect(wickShape(r.open, r.high, r.low, r.close)).not.toBeNull();
+    }
+  });
+
+  it("rejects red and flat candles regardless of tail", () => {
+    const r = reference(1);
+    expect(wickShape(r.close, r.high, r.low, r.open)).toBeNull(); // red
+    expect(wickShape(100, 100, 100, 100)).toBeNull(); // flat
+  });
+
+  it("rejects candles without a lower wick", () => {
+    expect(wickShape(99, 101, 99, 100)).toBeNull(); // low == open
+  });
+
+  it("rejects when the tail is smaller than the body", () => {
+    // body 1, tail 0.5, upper 0.1 — a normal green candle, no signal
+    expect(wickShape(100, 101.1, 99.5, 101)).toBeNull();
+  });
+
+  it("rejects when the upper shadow beats the tail", () => {
+    // body 1, tail 2, upper 3 — tail not dominant
+    expect(wickShape(100, 105, 98, 101)).toBeNull();
+  });
+
+  it("accepts any green candle whose tail merely dominates body and upper shadow", () => {
+    // body 1, tail 1.5, upper 1.2 — modest but structurally matching
+    const s = wickShape(100, 102.2, 98.5, 101);
     expect(s).not.toBeNull();
-    expect(s!.wick).toBe(10);
-    expect(s!.rangeShare).toBeCloseTo(10 / 11, 6);
-    expect(s!.bodyMultiple).toBe(20);
-    expect(s!.closedAt).toBe(1_700_000_000_000 + 60_000);
-  });
-
-  it("rejects red candles even with a huge tail", () => {
-    expect(lowerWickSignal(bar({ open: 100.5, close: 100 }), "BTCUSDT", "1m")).toBeNull();
-  });
-
-  it("rejects forming candles even when the shape qualifies", () => {
-    expect(lowerWickSignal(bar({ closed: false }), "BTCUSDT", "1m")).toBeNull();
-  });
-
-  it("rejects a lower wick below the reference size — small tail on a big body", () => {
-    // body 9, tail 2.5 → share ≈ 0.22, multiple ≈ 0.28
-    expect(lowerWickSignal(bar({ high: 110, low: 97.5, close: 109 }), "BTCUSDT", "1m")).toBeNull();
-  });
-
-  it("rejects when the tail dominates the range but the body dwarfs it", () => {
-    // body 9, tail 9, upper 0 → share 0.5 < 0.7
-    expect(lowerWickSignal(bar({ open: 100, close: 109, high: 109, low: 91 }), "BTCUSDT", "1m")).toBeNull();
-  });
-
-  it("rejects when the tail is 3× the body but under 70% of range", () => {
-    // body 1, tail 3.5, upper 1 → multiple 3.5, share 0.636
-    expect(lowerWickSignal(bar({ open: 100, close: 101, high: 102, low: 96.5 }), "BTCUSDT", "1m")).toBeNull();
-  });
-
-  it("accepts exactly-at-threshold tails (share ≥0.7, multiple ≥3)", () => {
-    // body 2, tail 6 (3× body), upper 0.5 → range 8.5, share 0.706.
-    const s = lowerWickSignal(bar({ open: 100, close: 102, high: 102.5, low: 94 }), "BTCUSDT", "1m");
-    expect(s).not.toBeNull();
-    expect(s!.bodyMultiple).toBe(3);
-  });
-
-  it("rejects doji-flat and zero-range candles", () => {
-    expect(lowerWickSignal(bar({ open: 100, close: 100, high: 101, low: 90 }), "BTCUSDT", "1m")).toBeNull();
-    expect(lowerWickSignal(bar({ open: 100, close: 100, high: 100, low: 100 }), "BTCUSDT", "1m")).toBeNull();
-  });
-
-  it("scales strength with tail size — bigger tail, higher multiples", () => {
-    const small = lowerWickSignal(bar({ open: 100, close: 100.5, high: 101, low: 96.5 }), "BTCUSDT", "1m")!;
-    const big = lowerWickSignal(bar(), "BTCUSDT", "1m")!;
-    expect(big.rangeShare).toBeGreaterThan(small.rangeShare);
-    expect(big.bodyMultiple).toBeGreaterThan(small.bodyMultiple);
   });
 });
 
-describe("scanClosedBars / newestClosedTime", () => {
-  const bars = [
-    bar({ time: 1000 }),
-    bar({ time: 2000, closed: false }),
-    bar({ time: 3000 }),
-    bar({ time: 4000, open: 101, close: 100, closed: true }), // red
-  ];
-
-  it("scans only closed bars and only ones newer than the watermark", () => {
-    const all = scanClosedBars(bars, "BTCUSDT", "1m", 0);
-    expect(all.map((s) => s.time)).toEqual([1000, 3000]);
-    expect(scanClosedBars(bars, "BTCUSDT", "1m", 1000).map((s) => s.time)).toEqual([3000]);
+describe("lowerWickSignal", () => {
+  it("carries the venue close time and closing price", () => {
+    const r = reference(1);
+    const s = lowerWickSignal("BTCUSDT", "15m", 1_000, 1_000 + 900_000, r.open, r.high, r.low, r.close)!;
+    expect(s.closedAt).toBe(1_000 + 900_000);
+    expect(s.close).toBe(r.close);
+    expect(s.wick).toBeCloseTo(4.5, 9);
+    expect(s.interval).toBe("15m");
   });
 
-  it("marks the newest closed bar as the baseline, skipping the forming one", () => {
-    // Baseline tracks closure, not qualification — the red bar at 4000 is closed.
-    expect(newestClosedTime(bars)).toBe(4000);
-    expect(newestClosedTime([])).toBe(0);
+  it("maps intervals to their length", () => {
+    expect(monitorIntervalMs("15m")).toBe(900_000);
+    expect(monitorIntervalMs("1h")).toBe(3_600_000);
+    expect(monitorIntervalMs("4h")).toBe(14_400_000);
+  });
+});
+
+type KlineRow = [number, string, string, string, string, string, number, ...unknown[]];
+
+const INTERVAL_LENGTH: Record<string, number> = { "15m": 900_000, "1h": 3_600_000, "4h": 14_400_000 };
+
+function kline(interval: string, openTime: number, o: number, h: number, l: number, c: number): KlineRow {
+  const ms = INTERVAL_LENGTH[interval];
+  return [openTime, String(o), String(h), String(l), String(c), "1", openTime + ms - 1, 0, 0, 0, "0", 0];
+}
+
+/** Drive the shared monitor with a canned fetch, answered per URL. */
+function monitorWith(handler: (url: string) => KlineRow[]) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => ({ ok: true, json: async () => handler(url) }) as Response),
+  );
+  return () => vi.unstubAllGlobals();
+}
+
+function hammer(interval: string, openTime: number, o = 100, drift = 0): KlineRow {
+  // body 1, tail 4.5, upper 0.3 — the reference shape
+  return kline(interval, openTime, o, o + 1 + 0.3, o - 4.5, o + 1 + drift);
+}
+
+describe("wickMonitor — closed candles only, once each", () => {
+  afterEach(() => {
+    wickMonitor.stop();
+    wickMonitor.reset();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
-  it("maps intervals to venue ms", () => {
-    expect(intervalMs("1m")).toBe(60_000);
-    expect(intervalMs("1h")).toBe(3_600_000);
+  it("emits a signal only when a new qualifying candle closes, and never repeats it", async () => {
+    const m15 = 900_000;
+    const base = Date.now(); // candle times are fixed — no clock drift between sweeps
+    const t = (n: number) => base - n * m15;
+    let calls15m = 0;
+    const cleanup = monitorWith((url) => {
+      const interval = new URL(url).searchParams.get("interval")!;
+      if (interval !== "15m") return [hammer(interval, t(3))]; // other TFs: static baseline
+      calls15m++;
+      if (calls15m === 1) return [hammer("15m", t(3)), hammer("15m", t(2))]; // history
+      return [hammer("15m", t(3)), hammer("15m", t(2)), hammer("15m", t(1))]; // fresh close
+    });
+
+    wickMonitor.setSymbols(["BTCUSDT"]);
+    await wickMonitor.tick(); // baseline — no emission
+    expect(wickMonitor.snapshot().signals).toHaveLength(0);
+    await wickMonitor.tick(); // the fresh 15m close
+    const signals = wickMonitor.snapshot().signals;
+    expect(signals).toHaveLength(1);
+    expect(signals[0]).toMatchObject({ symbol: "BTCUSDT", interval: "15m", close: 101 });
+    await wickMonitor.tick(); // same data again — no repeat
+    expect(wickMonitor.snapshot().signals).toHaveLength(1);
+    cleanup();
+  });
+
+  it("never emits history on first sight and ignores red candles", async () => {
+    const m15 = 900_000;
+    const base = Date.now();
+    const t = (n: number) => base - n * m15;
+    const cleanup = monitorWith((url) => {
+      const interval = new URL(url).searchParams.get("interval")!;
+      return interval === "15m"
+        ? [kline("15m", t(2), 100, 100.3, 95.5, 99.9)] // closed but red
+        : [hammer(interval, t(3))];
+    });
+
+    wickMonitor.setSymbols(["ETHUSDT"]);
+    await wickMonitor.tick();
+    await wickMonitor.tick();
+    expect(wickMonitor.snapshot().signals).toHaveLength(0);
+    cleanup();
+  });
+
+  it("reports blocked after repeated failures", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("cors"); }));
+    wickMonitor.setSymbols(["XRPUSDT"]);
+    // 3 requests per tick × 4 ticks = 12 consecutive failures → blocked
+    for (let i = 0; i < 5; i++) await wickMonitor.tick();
+    expect(wickMonitor.snapshot().status).toBe("blocked");
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 });
