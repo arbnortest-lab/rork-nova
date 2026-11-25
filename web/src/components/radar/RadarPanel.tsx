@@ -21,6 +21,7 @@ import type { AggTrade, SocketState } from "@/lib/wick/types";
 import { cn } from "@/lib/utils";
 
 import { ImbalanceBar, OiTrendTag, SqueezeMeter } from "./gauges";
+import { LowerWickSignals } from "./LowerWickSignals";
 import { CHART_COLORS, RadarChart, type PriceLineSpec } from "./RadarChart";
 
 /** Whale prints kept per contract — mirrors the provider's cap. */
@@ -592,6 +593,9 @@ export const RadarPanel = memo(function RadarPanel({
             <TradeTape read={read} decimals={decimals} />
             <LiquidationsPane read={read} decimals={decimals} />
           </div>
+
+          {/* bullish lower-wick signals — additive, reads closed candles only */}
+          <LowerWickSignals chart={chart} />
 
           <p className="num border-t border-line-soft px-3 py-2 text-[10px] leading-[1.5] text-muted-foreground">
             Pure signal radar — no auto-trading. Streams attached {timeAgo(read.attachedAt, now)}; they close two minutes after
