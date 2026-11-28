@@ -23,7 +23,15 @@ import { WickFeed } from "@/lib/wick/feed";
 import { readLiquidity } from "@/lib/wick/levels";
 import { deliverRemote, playWickChime, showDesktop, type DeliveryResult } from "@/lib/wick/notify";
 import { setupFellApart } from "@/lib/wick/rearm";
-import { DEFAULT_WICK_RULES, sanitizeWickRules } from "@/lib/wick/rules";
+import {
+  applyPreset,
+  DEFAULT_WICK_RULES,
+  sanitizeSavedConfigs,
+  sanitizeWickRules,
+  upsertSavedConfig,
+  type SavedWickConfig,
+  type WickPresetId,
+} from "@/lib/wick/rules";
 import type {
   FeedStatus,
   LiquidityRead,
@@ -36,6 +44,7 @@ import { fmtPrice } from "@/lib/format";
 import { loadState, saveState, uid } from "@/lib/storage";
 
 const RULES_KEY = "wick-rules";
+const SAVED_CONFIGS_KEY = "wick-saved-configs";
 const PREFS_KEY = "wick-prefs";
 const ALERTS_KEY = "wick-alerts";
 
@@ -72,6 +81,13 @@ interface WickValue {
   rules: WickRules;
   patchRules: (patch: Partial<WickRules>) => void;
   resetRules: () => void;
+  /** Applies a preset's gate values, keeping the scanner settings. */
+  applyRulesPreset: (id: WickPresetId) => void;
+  /** Named rule sets the user saved, newest first. Persisted locally. */
+  savedConfigs: SavedWickConfig[];
+  saveConfig: (name: string) => void;
+  loadConfig: (name: string) => void;
+  deleteConfig: (name: string) => void;
   prefs: WickPrefs;
   patchPrefs: (patch: Partial<WickPrefs>) => void;
 
@@ -162,6 +178,8 @@ export function WickProvider({ children }: { children: ReactNode }) {
   const [refreshedAt, setRefreshedAt] = useState<number>(0);
   const [excluded, setExcluded] = useState<number>(0);
 
+  const [savedConfigs, setSavedConfigs] = useState<SavedWickConfig[]>([]);
+  const savedRef = useRef<SavedWickConfig[]>([]);
   const rulesRef = useRef<WickRules>(DEFAULT_WICK_RULES);
   const prefsRef = useRef<WickPrefs>(DEFAULT_PREFS);
   const alertsRef = useRef<WickAlert[]>([]);
@@ -184,6 +202,8 @@ export function WickProvider({ children }: { children: ReactNode }) {
 
     rulesRef.current = loadedRules;
     prefsRef.current = loadedPrefs;
+    savedRef.current = sanitizeSavedConfigs(loadState<unknown>(SAVED_CONFIGS_KEY, []));
+    setSavedConfigs(savedRef.current);
     // Signals raised on contracts outside the tracked universe are history
     // the project no longer keeps, judged by the price they were raised at.
     const storedAlerts = Array.isArray(loadedAlerts) ? loadedAlerts.slice(0, MAX_ALERTS) : [];
@@ -443,6 +463,13 @@ export function WickProvider({ children }: { children: ReactNode }) {
     };
   }, [ready, prefs.paused, rules.refreshMs, runPass]);
 
+  // The daily-history fetch follows the liquidity horizon, so a horizon longer
+  // than a year is measured on that many bars rather than a truncated window.
+  useEffect(() => {
+    if (!ready) return;
+    feedRef.current?.setHorizonDays(rules.horizonDays);
+  }, [ready, rules.horizonDays]);
+
   /* ---------------------------------------------------------------- */
   /* Mutators                                                         */
   /* ---------------------------------------------------------------- */
@@ -458,6 +485,36 @@ export function WickProvider({ children }: { children: ReactNode }) {
     rulesRef.current = { ...DEFAULT_WICK_RULES };
     setRules({ ...DEFAULT_WICK_RULES });
     saveState(RULES_KEY, DEFAULT_WICK_RULES);
+  }, []);
+
+  const applyRulesPreset = useCallback((id: WickPresetId) => {
+    const next = applyPreset(rulesRef.current, id);
+    rulesRef.current = next;
+    setRules(next);
+    saveState(RULES_KEY, next);
+  }, []);
+
+  const saveConfig = useCallback((name: string) => {
+    const list = upsertSavedConfig(savedRef.current, name, rulesRef.current);
+    savedRef.current = list;
+    setSavedConfigs(list);
+    saveState(SAVED_CONFIGS_KEY, list);
+  }, []);
+
+  const loadConfig = useCallback((name: string) => {
+    const found = savedRef.current.find((c) => c.name === name);
+    if (!found) return;
+    const next = sanitizeWickRules(found.rules);
+    rulesRef.current = next;
+    setRules(next);
+    saveState(RULES_KEY, next);
+  }, []);
+
+  const deleteConfig = useCallback((name: string) => {
+    const list = savedRef.current.filter((c) => c.name !== name);
+    savedRef.current = list;
+    setSavedConfigs(list);
+    saveState(SAVED_CONFIGS_KEY, list);
   }, []);
 
   const select = useCallback(
@@ -604,6 +661,11 @@ export function WickProvider({ children }: { children: ReactNode }) {
       rules,
       patchRules,
       resetRules,
+      applyRulesPreset,
+      savedConfigs,
+      saveConfig,
+      loadConfig,
+      deleteConfig,
       prefs,
       patchPrefs,
       reads,
@@ -636,6 +698,11 @@ export function WickProvider({ children }: { children: ReactNode }) {
       rules,
       patchRules,
       resetRules,
+      applyRulesPreset,
+      savedConfigs,
+      saveConfig,
+      loadConfig,
+      deleteConfig,
       prefs,
       patchPrefs,
       reads,

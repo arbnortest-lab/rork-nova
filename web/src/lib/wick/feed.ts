@@ -117,13 +117,21 @@ const DAY_MS = 86_400_000;
 /**
  * Daily bars fetched per contract.
  *
- * Must cover the widest `horizonDays` the rules allow (365) plus the
- * in-progress day that gate 4 discards. Fetching fewer silently collapses
- * every horizon setting onto the same short window: at limit=70 a "1-year
- * high" was really a 70-day high, so the strictest gate was the easiest to
- * pass. Binance caps klines at 1500 per request, so this is one call.
+ * The floor; `setHorizonDays` raises it so the fetch always covers the
+ * configured `horizonDays` plus the in-progress day that gate 4 discards.
+ * Fetching fewer silently collapses every horizon setting onto the same short
+ * window: at limit=70 a "1-year high" was really a 70-day high, so the
+ * strictest gate was the easiest to pass. Binance caps klines at 1500 per
+ * request, so this is always one call.
  */
 const DAILY_LIMIT = 400;
+const DAILY_LIMIT_MAX = 1_500;
+
+/** Daily bars needed to measure a horizon of `days` completed days. */
+export function dailyLimitFor(days: number): number {
+  const want = Math.ceil(Number.isFinite(days) ? days : 0) + 2;
+  return Math.min(DAILY_LIMIT_MAX, Math.max(DAILY_LIMIT, want));
+}
 
 function num(v: unknown): number {
   const n = typeof v === "number" ? v : typeof v === "string" ? Number.parseFloat(v) : NaN;
@@ -264,6 +272,9 @@ export class WickFeed {
   /* --- cached REST state (tier 2) --- */
   private klines5m = new Map<string, CacheEntry<Kline[]>>();
   private klinesDaily = new Map<string, CacheEntry<Kline[]>>();
+  /** The `limit` each cached daily series was fetched with. */
+  private dailyFetchedWith = new Map<string, number>();
+  private dailyLimit = DAILY_LIMIT;
   private inflight = new Set<string>();
 
   private universe: string[] = [];
@@ -571,16 +582,23 @@ export class WickFeed {
     const daily = this.klinesDaily.get(symbol);
     // Also due once the UTC day turns: only a refetch completes the bar that was
     // still in progress last time.
-    if (force || !daily || now - daily.at > DAILY_TTL_MS || !sameUtcDay(daily.at, now)) {
+    // A longer horizon than the cached series was fetched for also forces a
+    // refetch, so widening the setting never measures a shorter window.
+    const shortFetch = (this.dailyFetchedWith.get(symbol) ?? 0) < this.dailyLimit;
+    if (force || !daily || shortFetch || now - daily.at > DAILY_TTL_MS || !sameUtcDay(daily.at, now)) {
       const key = `k1d:${symbol}`;
       if (!this.inflight.has(key)) {
         this.inflight.add(key);
+        const limit = this.dailyLimit;
         try {
           const rows = await this.getJson<unknown>(
-            `/fapi/v1/klines?symbol=${symbol}&interval=1d&limit=${DAILY_LIMIT}`,
+            `/fapi/v1/klines?symbol=${symbol}&interval=1d&limit=${limit}`,
           );
           const parsed = WickFeed.parseKlines(rows);
-          if (parsed.length) this.klinesDaily.set(symbol, { at: now, value: parsed });
+          if (parsed.length) {
+            this.klinesDaily.set(symbol, { at: now, value: parsed });
+            this.dailyFetchedWith.set(symbol, limit);
+          }
         } catch {
           // Keep the last good series; `daily()` stops serving it once stale.
         } finally {
@@ -902,8 +920,24 @@ export class WickFeed {
       if (!this.tracked.has(symbol) && !klineFresh(entry.at, now)) this.klines5m.delete(symbol);
     }
     for (const [symbol, entry] of this.klinesDaily) {
-      if (!this.tracked.has(symbol) && !dailyFresh(entry.at, now)) this.klinesDaily.delete(symbol);
+      if (!this.tracked.has(symbol) && !dailyFresh(entry.at, now)) {
+        this.klinesDaily.delete(symbol);
+        this.dailyFetchedWith.delete(symbol);
+      }
     }
+  }
+
+  /**
+   * Sizes the daily-history fetch to the configured liquidity horizon. Raising
+   * it refetches tracked contracts at once; lowering it keeps the longer cached
+   * series (gate 4 slices what it needs) until the next scheduled refresh.
+   */
+  setHorizonDays(days: number): void {
+    const next = dailyLimitFor(days);
+    if (next === this.dailyLimit) return;
+    const grew = next > this.dailyLimit;
+    this.dailyLimit = next;
+    if (grew) for (const symbol of this.freshTargets()) void this.loadKlines(symbol);
   }
 
   /** Refresh history for everything tracked, and forget what can no longer be served. */

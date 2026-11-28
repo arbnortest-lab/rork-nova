@@ -19,9 +19,26 @@ import {
   wickShare,
   type ExhaustionInput,
 } from "@/lib/wick/exhaustion";
-import { isUsdtPerp } from "@/lib/wick/feed";
+import { dailyLimitFor, isUsdtPerp } from "@/lib/wick/feed";
 import { atrPct, findPivots, readLiquidity, readProfile, readStructure, readVwap } from "@/lib/wick/levels";
-import { DEFAULT_WICK_RULES, RVOL_LOOKBACK, sanitizeWickRules } from "@/lib/wick/rules";
+import {
+  applyPreset,
+  DEFAULT_WICK_RULES,
+  matchPreset,
+  MAX_DEEP_WATCH,
+  MAX_HORIZON_DAYS,
+  RVOL_LOOKBACK,
+  sanitizeSavedConfigs,
+  sanitizeWickRules,
+  SLIDER_STEPS,
+  sliderToValue,
+  upsertSavedConfig,
+  validateParamInput,
+  valueToSlider,
+  WICK_PARAM_BY_KEY,
+  WICK_PARAMS,
+  WICK_PRESETS,
+} from "@/lib/wick/rules";
 import type {
   AggTrade,
   BookSnapshot,
@@ -1246,7 +1263,7 @@ describe("engine configuration", () => {
     expect(sanitizeWickRules({})).toEqual(DEFAULT_WICK_RULES);
   });
 
-  it("clamps out-of-range values", () => {
+  it("clamps out-of-range values to the schema", () => {
     const r = sanitizeWickRules({
       minVolume: -10,
       pinBps: 0,
@@ -1254,29 +1271,122 @@ describe("engine configuration", () => {
       depletionPct: 99,
       horizonDays: 5_000,
       deepWatch: 900,
-      cooldownMins: 0,
+      cooldownMins: -5,
+      wickPct: 400,
+      refreshMs: 37,
     });
     expect(r.minVolume).toBe(0);
-    expect(r.pinBps).toBe(0.5);
-    expect(r.rvolClimax).toBe(150);
-    expect(r.depletionPct).toBe(10);
-    expect(r.horizonDays).toBe(365);
-    expect(r.deepWatch).toBe(24);
-    expect(r.cooldownMins).toBe(1);
+    expect(r.pinBps).toBe(0.1);
+    expect(r.rvolClimax).toBe(100);
+    expect(r.depletionPct).toBe(25);
+    expect(r.horizonDays).toBe(MAX_HORIZON_DAYS);
+    expect(r.deepWatch).toBe(MAX_DEEP_WATCH);
+    expect(r.cooldownMins).toBe(0);
+    expect(r.wickPct).toBe(100);
+    expect(r.refreshMs).toBe(500);
   });
 
-  it("will not let the wick floor be configured below the 45% specification", () => {
-    expect(sanitizeWickRules({ wickPct: 10 }).wickPct).toBe(45);
-    expect(sanitizeWickRules({ wickPct: 60 }).wickPct).toBe(60);
+  it("accepts the expanded ranges the trader asked for", () => {
+    const r = sanitizeWickRules({ pinBps: 500, rvolClimax: 5_000, wickPct: 100, depletionPct: 5, cooldownMins: 0 });
+    expect(r).toMatchObject({ pinBps: 500, rvolClimax: 5_000, wickPct: 100, depletionPct: 5, cooldownMins: 0 });
   });
 
-  it("rejects a refresh cadence that is not an offered option", () => {
-    expect(sanitizeWickRules({ refreshMs: 37 }).refreshMs).toBe(DEFAULT_WICK_RULES.refreshMs);
-    expect(sanitizeWickRules({ refreshMs: 5_000 }).refreshMs).toBe(5_000);
+  it("loads every config an older build could have stored unchanged", () => {
+    const legacy = {
+      refreshMs: 5_000,
+      minVolume: 25_000_000,
+      pinBps: 0.5,
+      rvolClimax: 2_000,
+      wickPct: 95,
+      depletionPct: 10,
+      horizonDays: 90,
+      deepWatch: 24,
+      cooldownMins: 1_440,
+    };
+    expect(sanitizeWickRules(legacy)).toEqual(legacy);
+    expect(sanitizeWickRules({ ...legacy, retired: true })).toEqual(legacy);
+  });
+
+  it("allows wick thresholds below the old 45% floor", () => {
+    expect(sanitizeWickRules({ wickPct: 10 }).wickPct).toBe(10);
+    expect(sanitizeWickRules({ wickPct: 0 }).wickPct).toBe(1);
+  });
+
+  it("accepts any scan cadence in range, rounded to whole milliseconds", () => {
+    expect(sanitizeWickRules({ refreshMs: 750.4 }).refreshMs).toBe(750);
+    expect(sanitizeWickRules({ refreshMs: 999_999 }).refreshMs).toBe(300_000);
+    expect(sanitizeWickRules({ refreshMs: "fast" }).refreshMs).toBe(DEFAULT_WICK_RULES.refreshMs);
   });
 
   it("rounds the deep-watch slot count to a whole number", () => {
     expect(sanitizeWickRules({ deepWatch: 7.6 }).deepWatch).toBe(8);
+  });
+
+  it("keeps every default inside its schema range", () => {
+    for (const spec of WICK_PARAMS) {
+      const v = DEFAULT_WICK_RULES[spec.key];
+      expect(v).toBeGreaterThanOrEqual(spec.min * spec.scale);
+      expect(v).toBeLessThanOrEqual(spec.max * spec.scale);
+    }
+  });
+
+  it("validates typed values in display units without clamping silently", () => {
+    const pin = WICK_PARAM_BY_KEY.pinBps;
+    expect(validateParamInput(pin, "12.5")).toEqual({ ok: true, stored: 12.5 });
+    expect(validateParamInput(pin, "12,5")).toEqual({ ok: true, stored: 12.5 });
+    expect(validateParamInput(pin, "1001").ok).toBe(false);
+    expect(validateParamInput(pin, "abc").ok).toBe(false);
+    expect(validateParamInput(pin, " ").ok).toBe(false);
+    expect(validateParamInput(WICK_PARAM_BY_KEY.refreshMs, "1.5")).toEqual({ ok: true, stored: 1_500 });
+    expect(validateParamInput(WICK_PARAM_BY_KEY.minVolume, "2.5")).toEqual({ ok: true, stored: 2_500_000 });
+    expect(validateParamInput(WICK_PARAM_BY_KEY.horizonDays, "400.4")).toEqual({ ok: true, stored: 400 });
+  });
+
+  it("maps slider positions across the full range and back", () => {
+    for (const spec of WICK_PARAMS) {
+      expect(sliderToValue(spec, 0)).toBeCloseTo(spec.min, 6);
+      expect(sliderToValue(spec, SLIDER_STEPS)).toBeCloseTo(spec.max, 6);
+      const def = DEFAULT_WICK_RULES[spec.key] / spec.scale;
+      const back = sliderToValue(spec, valueToSlider(spec, def));
+      // Round trip lands within 3% of the range-relative position.
+      expect(Math.abs(valueToSlider(spec, back) - valueToSlider(spec, def))).toBeLessThanOrEqual(30);
+    }
+  });
+
+  it("detects presets, and treats Balanced as the defaults", () => {
+    expect(matchPreset(DEFAULT_WICK_RULES)).toBe("balanced");
+    for (const preset of WICK_PRESETS) {
+      const applied = applyPreset(DEFAULT_WICK_RULES, preset.id);
+      expect(applied).toEqual(sanitizeWickRules(applied));
+      expect(matchPreset(applied)).toBe(preset.id);
+      // Scanner settings are the trader's, not the preset's.
+      expect(applied.refreshMs).toBe(DEFAULT_WICK_RULES.refreshMs);
+      expect(applied.deepWatch).toBe(DEFAULT_WICK_RULES.deepWatch);
+      expect(applied.minVolume).toBe(DEFAULT_WICK_RULES.minVolume);
+    }
+    expect(matchPreset({ ...DEFAULT_WICK_RULES, pinBps: 7.3 })).toBe("custom");
+  });
+
+  it("saves, overwrites and restores named configs", () => {
+    let list = upsertSavedConfig([], "  Scalp  ", { ...DEFAULT_WICK_RULES, pinBps: 9 }, 1);
+    list = upsertSavedConfig(list, "Swing", { ...DEFAULT_WICK_RULES, horizonDays: 730 }, 2);
+    list = upsertSavedConfig(list, "scalp", { ...DEFAULT_WICK_RULES, pinBps: 11 }, 3);
+    expect(list.map((c) => c.name)).toEqual(["scalp", "Swing"]);
+    expect(list[0].rules.pinBps).toBe(11);
+    expect(upsertSavedConfig(list, "   ", DEFAULT_WICK_RULES)).toBe(list);
+
+    const restored = sanitizeSavedConfigs(JSON.parse(JSON.stringify([...list, null, { name: "" }, { name: "x", rules: { pinBps: 1e9 } }])));
+    expect(restored.map((c) => c.name)).toEqual(["scalp", "Swing", "x"]);
+    expect(restored[1].rules.horizonDays).toBe(730);
+    expect(restored[2].rules.pinBps).toBe(1_000);
+    expect(sanitizeSavedConfigs("junk")).toEqual([]);
+  });
+
+  it("sizes the daily fetch to the horizon, within one request", () => {
+    expect(dailyLimitFor(90)).toBe(400);
+    expect(dailyLimitFor(365)).toBe(400);
+    expect(dailyLimitFor(730)).toBe(732);
+    expect(dailyLimitFor(MAX_HORIZON_DAYS)).toBeLessThanOrEqual(1_500);
   });
 
   it("ranks candidacy on proximity to the 24h high above all else", () => {

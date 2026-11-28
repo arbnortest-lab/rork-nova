@@ -10,7 +10,6 @@ import {
   Pin,
   Play,
   RefreshCw,
-  RotateCcw,
   ScanSearch,
   Search,
   Send,
@@ -27,6 +26,7 @@ import { OnChainBadge, OnChainDetail } from "@/components/OnChainBadge";
 import { ConfluenceMatrix } from "@/components/radar/ConfluenceMatrix";
 import { MiniImbalance, MiniSqueeze } from "@/components/radar/gauges";
 import { RadarPanel } from "@/components/radar/RadarPanel";
+import { RulesConfig } from "@/components/wick/RulesConfig";
 import { Input } from "@/components/ui/input";
 import { fmtClock, fmtCompactUsd, fmtPrice, fmtSignedPct, timeAgo } from "@/lib/format";
 import {
@@ -53,7 +53,7 @@ import type { OnChainJob } from "@/lib/onchain/schedule";
 import { routeSummary } from "@/lib/radar/stream";
 import type { RadarRead } from "@/lib/radar/types";
 import type { ExhaustionRead } from "@/lib/wick/exhaustion";
-import { HORIZON_OPTIONS, REFRESH_OPTIONS } from "@/lib/wick/rules";
+import { REFRESH_OPTIONS, formatParam, WICK_PARAM_BY_KEY } from "@/lib/wick/rules";
 import type { GateRead, SocketState, TrapSide, WickAlert } from "@/lib/wick/types";
 import { PRICE_BAND_LABEL, UNIVERSE_LABEL } from "@/lib/wick/universe";
 import { cn } from "@/lib/utils";
@@ -520,6 +520,11 @@ export default function Wick() {
     rules,
     patchRules,
     resetRules,
+    applyRulesPreset,
+    savedConfigs,
+    saveConfig,
+    loadConfig,
+    deleteConfig,
     prefs,
     patchPrefs,
     reads,
@@ -657,7 +662,13 @@ export default function Wick() {
 
             <Segmented
               value={String(rules.refreshMs)}
-              options={REFRESH_OPTIONS.map((o) => ({ value: String(o.value), label: o.label }))}
+              options={[
+                ...REFRESH_OPTIONS.map((o) => ({ value: String(o.value), label: o.label })),
+                // A cadence set precisely in Config shows here as its own selected chip.
+                ...(REFRESH_OPTIONS.some((o) => o.value === rules.refreshMs)
+                  ? []
+                  : [{ value: String(rules.refreshMs), label: formatParam(WICK_PARAM_BY_KEY.refreshMs, rules.refreshMs) }]),
+              ]}
               onChange={(v) => patchRules({ refreshMs: Number(v) })}
               className="w-[132px]"
             />
@@ -713,132 +724,19 @@ export default function Wick() {
 
       {/* ---------------- config ---------------- */}
       {showConfig ? (
-        <Panel
-          title="Gate thresholds"
-          aside={
-            <Button tone="ghost" size="sm" onClick={resetRules}>
-              <RotateCcw className="h-[11px] w-[11px]" />
-              Defaults
-            </Button>
-          }
-        >
-          <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
-            <div>
-              <div className="lbl mb-1">Pin distance</div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="range"
-                  min={0.5}
-                  max={50}
-                  step={0.5}
-                  value={rules.pinBps}
-                  onChange={(e) => patchRules({ pinBps: Number(e.target.value) })}
-                  className="h-1 flex-1 accent-primary"
-                  aria-label="Pin distance from the 24h high, in basis points"
-                />
-                <span className="num w-14 text-right text-[12.5px] font-semibold text-primary">{rules.pinBps} bps</span>
-              </div>
-            </div>
-            <div>
-              <div className="lbl mb-1">Volume climax</div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="range"
-                  min={150}
-                  max={1000}
-                  step={10}
-                  value={rules.rvolClimax}
-                  onChange={(e) => patchRules({ rvolClimax: Number(e.target.value) })}
-                  className="h-1 flex-1 accent-primary"
-                  aria-label="Relative volume climax threshold"
-                />
-                <span className="num w-11 text-right text-[12.5px] font-semibold">{rules.rvolClimax}%</span>
-              </div>
-            </div>
-            <div>
-              <div className="lbl mb-1">Rejection wick</div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="range"
-                  min={45}
-                  max={95}
-                  step={1}
-                  value={rules.wickPct}
-                  onChange={(e) => patchRules({ wickPct: Number(e.target.value) })}
-                  className="h-1 flex-1 accent-primary"
-                  aria-label="Rejection wick as a share of the candle range"
-                />
-                <span className="num w-11 text-right text-[12.5px] font-semibold">{rules.wickPct}%</span>
-              </div>
-            </div>
-            <div>
-              <div className="lbl mb-1">Depletion band</div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="range"
-                  min={0}
-                  max={5}
-                  step={0.1}
-                  value={rules.depletionPct}
-                  onChange={(e) => patchRules({ depletionPct: Number(e.target.value) })}
-                  className="h-1 flex-1 accent-primary"
-                  aria-label="Distance to the long-horizon high that counts as swept"
-                />
-                <span className="num w-11 text-right text-[12.5px] font-semibold">
-                  {rules.depletionPct.toFixed(1)}%
-                </span>
-              </div>
-            </div>
-            <div>
-              <div className="lbl mb-1">Liquidity horizon</div>
-              <Segmented
-                value={String(rules.horizonDays)}
-                options={HORIZON_OPTIONS.map((o) => ({ value: String(o.value), label: o.label }))}
-                onChange={(v) => patchRules({ horizonDays: Number(v) })}
-              />
-            </div>
-            <div>
-              <div className="lbl mb-1">History slots</div>
-              <Segmented
-                value={String(rules.deepWatch)}
-                options={[
-                  { value: "6", label: "6" },
-                  { value: "12", label: "12" },
-                  { value: "18", label: "18" },
-                  { value: "24", label: "24" },
-                ]}
-                onChange={(v) => patchRules({ deepWatch: Number(v) })}
-              />
-            </div>
-            <div>
-              <div className="lbl mb-1">Min 24h turnover</div>
-              <Segmented
-                value={String(rules.minVolume)}
-                options={[
-                  { value: "0", label: "Any" },
-                  { value: "1000000", label: "$1M" },
-                  { value: "5000000", label: "$5M" },
-                  { value: "25000000", label: "$25M" },
-                ]}
-                onChange={(v) => patchRules({ minVolume: Number(v) })}
-              />
-            </div>
-            <div>
-              <div className="lbl mb-1">Cooldown</div>
-              <Segmented
-                value={String(rules.cooldownMins)}
-                options={[
-                  { value: "5", label: "5m" },
-                  { value: "15", label: "15m" },
-                  { value: "30", label: "30m" },
-                  { value: "120", label: "2h" },
-                ]}
-                onChange={(v) => patchRules({ cooldownMins: Number(v) })}
-              />
-            </div>
-          </div>
-
-          <div className="mt-4 border-t border-line-soft pt-3">
+        <>
+        <RulesConfig
+          rules={rules}
+          patchRules={patchRules}
+          resetRules={resetRules}
+          applyPreset={applyRulesPreset}
+          savedConfigs={savedConfigs}
+          saveConfig={saveConfig}
+          loadConfig={loadConfig}
+          deleteConfig={deleteConfig}
+        />
+        <Panel title="Universe & alerts">
+          <div>
             <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
               <span className="lbl">Universe</span>
               <Tag tone="brand">{UNIVERSE_LABEL}</Tag>
@@ -1004,6 +902,7 @@ export default function Wick() {
             </p>
           </div>
         </Panel>
+        </>
       ) : null}
 
       {/* ---------------- focus + feed ---------------- */}
